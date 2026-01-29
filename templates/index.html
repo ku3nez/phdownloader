@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PH Downloader</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            text-align: center;
+            background-color: #1e1e1e;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            width: 100%;
+            max-width: 500px;
+        }
+
+        h1 {
+            margin-bottom: 30px;
+            color: #ff9900;
+        }
+
+        input[type="text"] {
+            width: 80%;
+            padding: 12px;
+            margin-bottom: 20px;
+            border: none;
+            border-radius: 5px;
+            background-color: #2c2c2c;
+            color: #fff;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            background-color: #ff9900;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #e68a00;
+        }
+
+        button:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+
+        #status-area {
+            margin-top: 25px;
+            display: none;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            background-color: #444;
+            border-radius: 5px;
+            height: 20px;
+            margin-bottom: 10px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: #ff9900;
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        #details-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #ddd;
+        }
+
+        #message {
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        #log-container {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #2c2c2c;
+            border-radius: 5px;
+            height: 100px;
+            overflow-y: auto;
+            text-align: left;
+            font-size: 11px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            color: #888;
+            border: 1px solid #333;
+        }
+
+        #log-container div {
+            margin-bottom: 2px;
+            line-height: 1.2;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>PH Downloader</h1>
+        <div>
+            <input type="text" id="urlInput" placeholder="Paste Pornhub URL here..." required>
+            <br>
+            <button id="downloadBtn" onclick="startDownload()">Download Video</button>
+        </div>
+
+        <div id="status-area">
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <div id="details-row">
+                <span id="speedLabel">Speed: ---</span>
+                <span id="sizeLabel">Downloaded: ---</span>
+            </div>
+            <p id="currentStatus" style="font-size: 13px; color: #ff9900; margin-bottom: 10px; font-weight: bold;">Ready
+            </p>
+            <div id="log-container"></div>
+            <p id="message">Initializing...</p>
+        </div>
+    </div>
+
+    <script>
+        async function startDownload() {
+            const url = document.getElementById('urlInput').value;
+            if (!url) {
+                alert("Please enter a URL");
+                return;
+            }
+
+            const btn = document.getElementById('downloadBtn');
+            const statusArea = document.getElementById('status-area');
+            const progressBar = document.getElementById('progressBar');
+            const message = document.getElementById('message');
+            const speedLabel = document.getElementById('speedLabel');
+            const sizeLabel = document.getElementById('sizeLabel');
+
+            btn.disabled = true;
+            statusArea.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressBar.style.backgroundColor = '#ff9900';
+            message.textContent = 'Starting download...';
+            speedLabel.textContent = 'Speed: ---';
+            sizeLabel.textContent = 'Downloaded: ---';
+            const logContainer = document.getElementById('log-container');
+            logContainer.innerHTML = '<div>Waiting for server...</div>';
+
+            try {
+                const response = await fetch('/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+
+                if (!response.ok) throw new Error("Failed to start download");
+
+                const data = await response.json();
+                const taskId = data.task_id;
+
+                pollProgress(taskId);
+            } catch (error) {
+                message.textContent = "Error: " + error.message;
+                btn.disabled = false;
+            }
+        }
+
+        async function pollProgress(taskId) {
+            const progressBar = document.getElementById('progressBar');
+            const message = document.getElementById('message');
+            const btn = document.getElementById('downloadBtn');
+            const speedLabel = document.getElementById('speedLabel');
+            const sizeLabel = document.getElementById('sizeLabel');
+
+            const interval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/progress/${taskId}`);
+                    const data = await res.json();
+
+                    if (data.logs && data.logs.length > 0) {
+                        const logContainer = document.getElementById('log-container');
+                        logContainer.innerHTML = data.logs.map(log => `<div>${log}</div>`).join('');
+                        logContainer.scrollTop = logContainer.scrollHeight;
+                    }
+
+                    if (data.current_status) {
+                        document.getElementById('currentStatus').textContent = data.current_status;
+                    }
+
+                    if (data.status === 'processing') {
+                        progressBar.style.width = data.progress + '%';
+                        message.textContent = `Downloading... ${Math.round(data.progress)}%`;
+
+                        if (data.details) {
+                            speedLabel.textContent = `Speed: ${data.details.speed}`;
+                            sizeLabel.textContent = `Downloaded: ${data.details.downloaded} / ${data.details.total}`;
+                        }
+                    } else if (data.status === 'completed') {
+                        clearInterval(interval);
+                        progressBar.style.width = '100%';
+                        message.textContent = 'Download complete! Saving file...';
+                        window.location.href = `/get_file/${taskId}`;
+                        btn.disabled = false;
+                    } else if (data.status === 'failed') {
+                        clearInterval(interval);
+                        progressBar.style.backgroundColor = 'red';
+                        message.textContent = 'Error: ' + data.error;
+                        btn.disabled = false;
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            }, 1000);
+        }
+    </script>
+</body>
+
+</html>
