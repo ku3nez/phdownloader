@@ -39,7 +39,7 @@ def cleanup_downloads():
 cleanup_thread = threading.Thread(target=cleanup_downloads, daemon=True)
 cleanup_thread.start()
 
-def background_download(task_id, url):
+def background_download(task_id, url, quality):
     def update_progress(info):
         if info['type'] == 'progress':
             tasks[task_id]['progress'] = info['percentage']
@@ -50,7 +50,7 @@ def background_download(task_id, url):
             tasks[task_id]['current_status'] = info['msg']
 
     try:
-        filename = download_video(url, output_path='downloads', progress_callback=update_progress)
+        filename = download_video(url, output_path='downloads', quality=quality, progress_callback=update_progress)
         if filename and os.path.exists(filename):
             tasks[task_id]['status'] = 'completed'
             tasks[task_id]['filename'] = filename
@@ -73,10 +73,12 @@ def start_download():
     if not url:
         return jsonify({"error": "URL is required"}), 400
     
+    quality = request.json.get('quality', '720')
+    
     task_id = str(uuid.uuid4())
     tasks[task_id] = {"status": "processing", "progress": 0, "filename": None, "error": None, "details": {}, "logs": []}
     
-    thread = threading.Thread(target=background_download, args=(task_id, url))
+    thread = threading.Thread(target=background_download, args=(task_id, url, quality))
     thread.start()
     
     return jsonify({"task_id": task_id})
