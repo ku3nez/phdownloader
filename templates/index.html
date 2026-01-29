@@ -5,9 +5,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Downloader</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <style>
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+            background: radial-gradient(circle at top right, #2c1a1a, #121212 40%),
+                radial-gradient(circle at bottom left, #1a1c2c, #121212 40%);
             background-color: #121212;
             color: #ffffff;
             display: flex;
@@ -15,52 +18,74 @@
             align-items: center;
             height: 100vh;
             margin: 0;
+            overflow: hidden;
         }
 
         .container {
             text-align: center;
-            background-color: #1e1e1e;
-            padding: 40px;
-            border-radius: 10px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            background-color: rgba(30, 30, 30, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 50px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
             width: 100%;
-            max-width: 500px;
+            max-width: 550px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
         h1 {
-            margin-bottom: 30px;
-            font-size: 2.5rem;
+            margin-bottom: 40px;
+            font-size: 2.8rem;
+            font-weight: 800;
+            letter-spacing: -1.5px;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 5px;
+            gap: 12px;
+            cursor: default;
         }
 
         .yt-part {
-            background-color: #ff0000;
-            color: #fff;
-            padding: 0 10px;
-            border-radius: 8px;
-            display: inline-flex;
+            display: flex;
             align-items: center;
+            color: #fff;
         }
 
-        .yt-part::before {
-            content: '▶';
-            margin-right: 5px;
-            font-size: 1.2rem;
+        .yt-icon {
+            background-color: #ff0000;
+            width: 44px;
+            height: 32px;
+            border-radius: 9px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 10px;
+            box-shadow: 0 4px 10px rgba(255, 0, 0, 0.3);
+            position: relative;
+        }
+
+        .yt-icon::after {
+            content: '';
+            width: 0;
+            height: 0;
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-left: 10px solid white;
+            margin-left: 3px;
         }
 
         .ph-part {
             color: #fff;
         }
 
-        .ph-part span {
-            background-color: #ff9900;
+        .ph-accent {
+            background: linear-gradient(135deg, #ff9900 0%, #cc7a00 100%);
             color: #000;
-            padding: 0 8px;
-            border-radius: 5px;
+            padding: 4px 12px;
+            border-radius: 8px;
             margin-left: 2px;
+            box-shadow: 0 4px 10px rgba(255, 153, 0, 0.2);
+            font-weight: 800;
         }
 
         input[type="text"] {
@@ -151,7 +176,10 @@
 
 <body>
     <div class="container">
-        <h1><span class="yt-part">Video</span><span class="ph-part">Down<span>loader</span></span></h1>
+        <h1>
+            <span class="yt-part"><i class="yt-icon"></i>Video</span>
+            <span class="ph-part">Down<span class="ph-accent">loader</span></span>
+        </h1>
         <div>
             <input type="text" id="urlInput" placeholder="Paste URL here..." required>
             <br>
