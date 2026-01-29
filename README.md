@@ -4,6 +4,10 @@ A web-based video downloader powered by Flask and `yt-dlp`. Supports a video hos
 
 *Provided for informational purposes only, has no commercial interest, all rights belong to their respective owners. The application was created with the help of AI.*
 
+| Base UI version | Sci-Fi UI version |
+| :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/a2adf751-3585-4a11-8cb1-fa8bf2a6dcfb" width="400"> | <img src="https://github.com/user-attachments/assets/c7dcf90c-53ba-49a6-b447-79828ec3478a" width="400"> |
+
 ## Features
 
 ### 1. Broad Website Support
