@@ -49,9 +49,11 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
         # Try to get the specific resolution or the next best thing below it
         format_str = f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]'
 
+    quality_suffix = f"_{quality}p" if quality != 'best' else "_best"
+    
     ydl_opts = {
         'format': format_str,
-        'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+        'outtmpl': os.path.join(output_path, f'%(title)s{quality_suffix}.%(ext)s'),
         'merge_output_format': 'mp4',
         'noplaylist': True,
         'quiet': False,
