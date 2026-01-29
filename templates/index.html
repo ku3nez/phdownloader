@@ -275,8 +275,12 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             const label = document.getElementById('serverOnlyLabel');
-            if (isRussian) {
+            if (label && isRussian) {
                 label.textContent = 'Скачать только на сервер';
+                document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
+                document.getElementById('downloadBtn').textContent = 'Скачать видео';
+                document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
+            } else if (isRussian) {
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
                 document.getElementById('downloadBtn').textContent = 'Скачать видео';
                 document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
@@ -309,7 +313,8 @@
 
             try {
                 const quality = document.getElementById('qualitySelect').value;
-                const serverOnly = document.getElementById('serverOnlyCheckbox').checked;
+                const serverOnlyCheckbox = document.getElementById('serverOnlyCheckbox');
+                const serverOnly = serverOnlyCheckbox ? serverOnlyCheckbox.checked : false;
                 const response = await fetch('/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
