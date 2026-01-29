@@ -3,11 +3,8 @@ Description=Pornhub Video Downloader Web Interface
 After=network.target
 
 [Service]
-# Adjust these paths if your installation location is different
 User=root
-WorkingDirectory=/opt/PHdownloader
-# Path to your python executable. 
-# If you use a virtual environment, change to /opt/PHdownloader/venv/bin/python3
+WorkingDirectory=/opt/phdownloader
 ExecStart=/usr/bin/python3 app.py
 Restart=always
 RestartSec=3
