@@ -135,6 +135,12 @@
                     <option value="360">360p</option>
                 </select>
             </div>
+            <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: center;">
+                <input type="checkbox" id="serverOnlyCheckbox"
+                    style="margin-right: 10px; transform: scale(1.2); cursor: pointer;">
+                <label id="serverOnlyLabel" for="serverOnlyCheckbox"
+                    style="font-size: 14px; color: #aaa; cursor: pointer;">Download to server only</label>
+            </div>
             <button id="downloadBtn" onclick="startDownload()">Download Video</button>
         </div>
 
@@ -154,6 +160,20 @@
     </div>
 
     <script>
+        // Localization logic
+        const lang = navigator.language || navigator.userLanguage;
+        const isRussian = lang.startsWith('ru');
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const label = document.getElementById('serverOnlyLabel');
+            if (isRussian) {
+                label.textContent = 'Скачать только на сервер';
+                document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
+                document.getElementById('downloadBtn').textContent = 'Скачать видео';
+                document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
+            }
+        });
+
         async function startDownload() {
             const url = document.getElementById('urlInput').value;
             if (!url) {
@@ -180,10 +200,11 @@
 
             try {
                 const quality = document.getElementById('qualitySelect').value;
+                const serverOnly = document.getElementById('serverOnlyCheckbox').checked;
                 const response = await fetch('/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url, quality: quality })
+                    body: JSON.stringify({ url: url, quality: quality, server_only: serverOnly })
                 });
 
                 if (!response.ok) throw new Error("Failed to start download");
@@ -232,8 +253,8 @@
                     } else if (data.status === 'completed') {
                         clearInterval(interval);
                         progressBar.style.width = '100%';
-                        message.textContent = 'Download complete! Saving file...';
-                        if (!isRedirecting) {
+                        message.textContent = data.server_only ? (isRussian ? 'Готово! Файл сохранен на сервере.' : 'Done! File saved on server.') : 'Download complete! Saving file...';
+                        if (!isRedirecting && !data.server_only) {
                             isRedirecting = true;
                             window.location.href = `/get_file/${taskId}`;
                         }
