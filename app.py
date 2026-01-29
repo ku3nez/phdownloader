@@ -26,6 +26,8 @@ def cleanup_downloads():
                     if os.path.isfile(file_path):
                         file_age = now - os.path.getmtime(file_path)
                         if file_age > FILE_EXPIRATION_SECONDS:
+                            if filename.startswith('[SERVER]'):
+                                continue
                             try:
                                 os.remove(file_path)
                                 print(f"Deleted old file: {file_path}")
@@ -39,7 +41,7 @@ def cleanup_downloads():
 cleanup_thread = threading.Thread(target=cleanup_downloads, daemon=True)
 cleanup_thread.start()
 
-def background_download(task_id, url, quality):
+def background_download(task_id, url, quality, server_only=False):
     def update_progress(info):
         if info['type'] == 'progress':
             tasks[task_id]['progress'] = info['percentage']
@@ -52,9 +54,15 @@ def background_download(task_id, url, quality):
     try:
         filename = download_video(url, output_path='downloads', quality=quality, progress_callback=update_progress)
         if filename and os.path.exists(filename):
+            if server_only:
+                server_filename = os.path.join(os.path.dirname(filename), '[SERVER] ' + os.path.basename(filename))
+                os.rename(filename, server_filename)
+                filename = server_filename
+            
             tasks[task_id]['status'] = 'completed'
             tasks[task_id]['filename'] = filename
             tasks[task_id]['progress'] = 100
+            tasks[task_id]['server_only'] = server_only
         else:
             tasks[task_id]['status'] = 'failed'
             if not tasks[task_id].get('error'):
@@ -74,11 +82,12 @@ def start_download():
         return jsonify({"error": "URL is required"}), 400
     
     quality = request.json.get('quality', '720')
+    server_only = request.json.get('server_only', False)
     
     task_id = str(uuid.uuid4())
-    tasks[task_id] = {"status": "processing", "progress": 0, "filename": None, "error": None, "details": {}, "logs": []}
+    tasks[task_id] = {"status": "processing", "progress": 0, "filename": None, "error": None, "details": {}, "logs": [], "server_only": server_only}
     
-    thread = threading.Thread(target=background_download, args=(task_id, url, quality))
+    thread = threading.Thread(target=background_download, args=(task_id, url, quality, server_only))
     thread.start()
     
     return jsonify({"task_id": task_id})
