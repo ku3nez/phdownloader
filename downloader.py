@@ -66,7 +66,7 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
         'hls_prefer_native': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web'],
+                'player_client': ['ios', 'android', 'web'],
                 'skip': ['hls', 'dash']
             }
         },
