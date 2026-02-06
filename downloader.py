@@ -18,6 +18,8 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
 
     class YdlLogger:
         def debug(self, msg):
+            if msg.startswith('[download]') and '%' in msg:
+                return
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': strip_ansi(msg)})
         def warning(self, msg):
