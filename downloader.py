@@ -64,25 +64,17 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
         'noplaylist': True,
         'quiet': False,
         'logger': YdlLogger(),
-        'concurrent_fragment_downloads': 32,
+        'concurrent_fragment_downloads': 4,
         'retries': 15,
         'fragment_retries': 15,
         'socket_timeout': 60,
         'nocontinue': False, # Allow resume if possible, though 'nocontinue': True was there before
         'hls_prefer_native': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios', 'android', 'web'],
-                'skip': ['hls', 'dash']
-            }
-        },
         'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else 'chrome',
         'http_headers': {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-User': '?1',
-            'Sec-Fetch-Dest': 'document',
+            'Referer': 'https://www.pornhub.com/',
         },
         'progress_hooks': [hook],
     }
