@@ -48,8 +48,9 @@ def background_download(task_id, url, quality, server_only=False):
             tasks[task_id]['details'] = info
         elif info['type'] == 'status':
             tasks[task_id]['logs'].append(info['msg'])
-            tasks[task_id]['logs'] = tasks[task_id]['logs'][-5:]  # Keep last 5
+            tasks[task_id]['logs'] = tasks[task_id]['logs'][-20:]  # Keep last 20 lines
             tasks[task_id]['current_status'] = info['msg']
+            print(f"[{task_id}] Status: {info['msg']}")
 
     try:
         filename = download_video(url, output_path='downloads', quality=quality, progress_callback=update_progress)

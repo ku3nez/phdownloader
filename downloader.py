@@ -1,6 +1,7 @@
 import yt_dlp
 import sys
 import os
+import traceback
 
 def download_video(url, output_path='downloads', quality='720', progress_callback=None):
     if not os.path.exists(output_path):
@@ -19,6 +20,7 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': f"WARNING: {strip_ansi(msg)}"})
         def error(self, msg):
+            print(f"yt-dlp ERROR: {msg}")
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': f"ERROR: {strip_ansi(msg)}"})
 
@@ -92,8 +94,16 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
                     filename = base + '.mp4'
             return filename
     except Exception as e:
+        error_msg = f"{str(e)}"
+        if not error_msg.strip():
+            error_msg = f"Unknown Error: {type(e).__name__}"
+        
+        full_tb = traceback.format_exc()
+        print(f"DOWNLOAD EXCEPTION CAUGHT:\n{full_tb}")
+        
         if progress_callback:
-            progress_callback({'type': 'status', 'msg': f"ERROR: {str(e)}"})
+            progress_callback({'type': 'status', 'msg': f"ERROR: {error_msg}"})
+            progress_callback({'type': 'status', 'msg': "Check server console for full traceback."})
         return None
 
 if __name__ == "__main__":
