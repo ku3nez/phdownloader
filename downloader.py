@@ -2,6 +2,10 @@ import yt_dlp
 import sys
 import os
 import traceback
+try:
+    from yt_dlp.networking.impersonate import ImpersonateTarget
+except ImportError:
+    ImpersonateTarget = None
 
 def download_video(url, output_path='downloads', quality='720', progress_callback=None):
     if not os.path.exists(output_path):
@@ -72,7 +76,7 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
                 'skip': ['hls', 'dash']
             }
         },
-        'impersonate': 'chrome',
+        'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else 'chrome',
         'http_headers': {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language': 'en-US,en;q=0.9',
