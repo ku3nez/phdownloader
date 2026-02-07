@@ -237,19 +237,21 @@
                 <label for="qualitySelect" style="font-size: 14px; color: #aaa; margin-right: 10px;">Quality:</label>
                 <select id="qualitySelect"
                     style="padding: 8px; border-radius: 5px; background-color: #2c2c2c; color: #fff; border: 1px solid #333;">
-                    <option value="best">Best Available</option>
-                    <option value="1080">1080p</option>
-                    <option value="720" selected>720p</option>
-                    <option value="480">480p</option>
-                    <option value="360">360p</option>
+                    <option value="best" {% if default_quality=='best' %}selected{% endif %}>Best Available</option>
+                    <option value="1080" {% if default_quality=='1080' %}selected{% endif %}>1080p</option>
+                    <option value="720" {% if default_quality=='720' %}selected{% endif %}>720p</option>
+                    <option value="480" {% if default_quality=='480' %}selected{% endif %}>480p</option>
+                    <option value="360" {% if default_quality=='360' %}selected{% endif %}>360p</option>
                 </select>
             </div>
+            {% if enable_save_on_server %}
             <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: center;">
                 <input type="checkbox" id="serverOnlyCheckbox"
                     style="margin-right: 10px; transform: scale(1.2); cursor: pointer;">
                 <label id="serverOnlyLabel" for="serverOnlyCheckbox"
                     style="font-size: 14px; color: #aaa; cursor: pointer;">Download to server only</label>
             </div>
+            {% endif %}
             <button id="downloadBtn" onclick="startDownload()">Download Video</button>
         </div>
 
@@ -275,8 +277,12 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             const label = document.getElementById('serverOnlyLabel');
-            if (isRussian) {
+            if (label && isRussian) {
                 label.textContent = 'Скачать только на сервер';
+                document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
+                document.getElementById('downloadBtn').textContent = 'Скачать видео';
+                document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
+            } else if (isRussian) {
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
                 document.getElementById('downloadBtn').textContent = 'Скачать видео';
                 document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
@@ -309,7 +315,8 @@
 
             try {
                 const quality = document.getElementById('qualitySelect').value;
-                const serverOnly = document.getElementById('serverOnlyCheckbox').checked;
+                const serverOnlyCheckbox = document.getElementById('serverOnlyCheckbox');
+                const serverOnly = serverOnlyCheckbox ? serverOnlyCheckbox.checked : false;
                 const response = await fetch('/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

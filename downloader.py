@@ -1,6 +1,11 @@
 import yt_dlp
 import sys
 import os
+import traceback
+try:
+    from yt_dlp.networking.impersonate import ImpersonateTarget
+except ImportError:
+    ImpersonateTarget = None
 
 def download_video(url, output_path='downloads', quality='720', progress_callback=None):
     if not os.path.exists(output_path):
@@ -13,12 +18,15 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
 
     class YdlLogger:
         def debug(self, msg):
+            if msg.startswith('[download]') and '%' in msg:
+                return
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': strip_ansi(msg)})
         def warning(self, msg):
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': f"WARNING: {strip_ansi(msg)}"})
         def error(self, msg):
+            print(f"yt-dlp ERROR: {msg}")
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': f"ERROR: {strip_ansi(msg)}"})
 
@@ -58,23 +66,17 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
         'noplaylist': True,
         'quiet': False,
         'logger': YdlLogger(),
-        'concurrent_fragment_downloads': 32,
+        'concurrent_fragment_downloads': 4,
         'retries': 15,
         'fragment_retries': 15,
         'socket_timeout': 60,
         'nocontinue': False, # Allow resume if possible, though 'nocontinue': True was there before
         'hls_prefer_native': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web'],
-                'skip': ['hls', 'dash']
-            }
-        },
+        'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else 'chrome',
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
-            'Sec-Fetch-Mode': 'navigate',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.pornhub.com/',
         },
         'progress_hooks': [hook],
     }
@@ -90,8 +92,16 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
                     filename = base + '.mp4'
             return filename
     except Exception as e:
+        error_msg = f"{str(e)}"
+        if not error_msg.strip():
+            error_msg = f"Unknown Error: {type(e).__name__}"
+        
+        full_tb = traceback.format_exc()
+        print(f"DOWNLOAD EXCEPTION CAUGHT:\n{full_tb}")
+        
         if progress_callback:
-            progress_callback({'type': 'status', 'msg': f"ERROR: {str(e)}"})
+            progress_callback({'type': 'status', 'msg': f"ERROR: {error_msg}"})
+            progress_callback({'type': 'status', 'msg': "Check server console for full traceback."})
         return None
 
 if __name__ == "__main__":
