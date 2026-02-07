@@ -4,6 +4,10 @@ import os
 import threading
 import uuid
 import time
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
@@ -11,7 +15,11 @@ app.secret_key = 'supersecretkey'
 # Global dictionary to store task status
 tasks = {}
 
-FILE_EXPIRATION_SECONDS = 300  # 5 minutes
+# Configuration from .env
+FILE_EXPIRATION_SECONDS = int(os.getenv('FILE_EXPIRATION_SECONDS', 300))
+ENABLE_SAVE_ON_SERVER = os.getenv('ENABLE_SAVE_ON_SERVER', 'False').lower() == 'true'
+DEFAULT_VIDEO_QUALITY = os.getenv('DEFAULT_VIDEO_QUALITY', '720')
+APP_PORT = int(os.getenv('PORT', 5008))
 CLEANUP_INTERVAL_SECONDS = 60  # 1 minute
 
 def cleanup_downloads():
@@ -74,7 +82,9 @@ def background_download(task_id, url, quality, server_only=False):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', 
+                           enable_save_on_server=ENABLE_SAVE_ON_SERVER, 
+                           default_quality=DEFAULT_VIDEO_QUALITY)
 
 @app.route('/start', methods=['POST'])
 def start_download():
@@ -82,7 +92,7 @@ def start_download():
     if not url:
         return jsonify({"error": "URL is required"}), 400
     
-    quality = request.json.get('quality', '720')
+    quality = request.json.get('quality', DEFAULT_VIDEO_QUALITY)
     server_only = request.json.get('server_only', False)
     
     task_id = str(uuid.uuid4())
@@ -108,4 +118,4 @@ def get_file(task_id):
     return send_file(task['filename'], as_attachment=True)
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5008)
+    app.run(debug=True, host='0.0.0.0', port=APP_PORT)
