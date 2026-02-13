@@ -55,11 +55,15 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'quiet': False,
         'logger': YdlLogger(),
         'concurrent_fragment_downloads': 4,
-        'retries': 15,
-        'fragment_retries': 15,
+        'retries': 30,
+        'fragment_retries': 30,
+        'retry_sleep_functions': {'http': lambda n: 5 * 2 ** n}, # Exponential backoff for HTTP errors
         'socket_timeout': 60,
         'nocontinue': False,
         'hls_prefer_native': True,
+        'nocheckcertificate': True,
+        'ignoreerrors': False,
+        'log_t_steps': True,
         'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else 'chrome',
         'http_headers': {
             'Accept': '*/*',

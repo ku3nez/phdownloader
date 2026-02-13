@@ -4,6 +4,7 @@ import os
 import threading
 import uuid
 import time
+import shutil
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -23,24 +24,27 @@ APP_PORT = int(os.getenv('PORT', 5008))
 CLEANUP_INTERVAL_SECONDS = 60  # 1 minute
 
 def cleanup_downloads():
-    """Background task to delete old files from the downloads folder."""
+    """Background task to delete old files and folders from the downloads folder."""
     while True:
         try:
             now = time.time()
             download_dir = 'downloads'
             if os.path.exists(download_dir):
-                for filename in os.listdir(download_dir):
-                    file_path = os.path.join(download_dir, filename)
-                    if os.path.isfile(file_path):
-                        file_age = now - os.path.getmtime(file_path)
+                for item in os.listdir(download_dir):
+                    item_path = os.path.join(download_dir, item)
+                    try:
+                        file_age = now - os.path.getmtime(item_path)
                         if file_age > FILE_EXPIRATION_SECONDS:
-                            if filename.startswith('[SERVER]'):
+                            if item.startswith('[SERVER]'):
                                 continue
-                            try:
-                                os.remove(file_path)
-                                print(f"Deleted old file: {file_path}")
-                            except Exception as e:
-                                print(f"Error deleting file {file_path}: {e}")
+                            if os.path.isfile(item_path):
+                                os.remove(item_path)
+                                print(f"Deleted old file: {item_path}")
+                            elif os.path.isdir(item_path):
+                                shutil.rmtree(item_path)
+                                print(f"Deleted old directory: {item_path}")
+                    except Exception as e:
+                        print(f"Error deleting {item_path}: {e}")
         except Exception as e:
             print(f"Cleanup error: {e}")
         time.sleep(CLEANUP_INTERVAL_SECONDS)
@@ -61,7 +65,12 @@ def background_download(task_id, url, quality, download_type='video', server_onl
             print(f"[{task_id}] Status: {info['msg']}")
 
     try:
-        filename = download_media(url, output_path='downloads', quality=quality, media_type=download_type, progress_callback=update_progress)
+        # Create a task-specific subdirectory to avoid filename collisions
+        task_dir = os.path.join('downloads', task_id)
+        if not os.path.exists(task_dir):
+            os.makedirs(task_dir)
+
+        filename = download_media(url, output_path=task_dir, quality=quality, media_type=download_type, progress_callback=update_progress)
         if filename and os.path.exists(filename):
             if server_only:
                 server_filename = os.path.join(os.path.dirname(filename), '[SERVER] ' + os.path.basename(filename))
