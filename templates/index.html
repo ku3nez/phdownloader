@@ -244,6 +244,20 @@
                     <option value="360" {% if default_quality=='360' %}selected{% endif %}>360p</option>
                 </select>
             </div>
+            <div style="margin-bottom: 20px;">
+                <label style="font-size: 14px; color: #aaa; margin-right: 10px;">Format:</label>
+                <div style="display: inline-flex; gap: 15px;">
+                    <label style="cursor: pointer; display: flex; align-items: center; font-size: 14px;">
+                        <input type="radio" name="format" value="video" checked
+                            style="margin-right: 5px; cursor: pointer;">
+                        Video (MP4)
+                    </label>
+                    <label style="cursor: pointer; display: flex; align-items: center; font-size: 14px;">
+                        <input type="radio" name="format" value="audio" style="margin-right: 5px; cursor: pointer;">
+                        Audio (MP3)
+                    </label>
+                </div>
+            </div>
             {% if enable_save_on_server %}
             <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: center;">
                 <input type="checkbox" id="serverOnlyCheckbox"
@@ -280,12 +294,31 @@
             if (label && isRussian) {
                 label.textContent = 'Скачать только на сервер';
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
-                document.getElementById('downloadBtn').textContent = 'Скачать видео';
+                document.getElementById('downloadBtn').textContent = 'Скачать';
                 document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
+
+                // New localization for format
+                const formatLabel = Array.from(document.querySelectorAll('label')).find(el => el.textContent.includes('Format:'));
+                if (formatLabel) formatLabel.textContent = 'Формат:';
+
+                const videoRadio = document.querySelector('input[value="video"]').parentElement;
+                if (videoRadio) videoRadio.lastChild.textContent = ' Видео (MP4)';
+
+                const audioRadio = document.querySelector('input[value="audio"]').parentElement;
+                if (audioRadio) audioRadio.lastChild.textContent = ' Аудио (MP3)';
             } else if (isRussian) {
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
-                document.getElementById('downloadBtn').textContent = 'Скачать видео';
+                document.getElementById('downloadBtn').textContent = 'Скачать';
                 document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
+
+                const formatLabel = Array.from(document.querySelectorAll('label')).find(el => el.textContent.includes('Format:'));
+                if (formatLabel) formatLabel.textContent = 'Формат:';
+
+                const videoRadio = document.querySelector('input[value="video"]').parentElement;
+                if (videoRadio) videoRadio.lastChild.textContent = ' Видео (MP4)';
+
+                const audioRadio = document.querySelector('input[value="audio"]').parentElement;
+                if (audioRadio) audioRadio.lastChild.textContent = ' Аудио (MP3)';
             }
         });
 
@@ -315,12 +348,13 @@
 
             try {
                 const quality = document.getElementById('qualitySelect').value;
+                const downloadType = document.querySelector('input[name="format"]:checked').value;
                 const serverOnlyCheckbox = document.getElementById('serverOnlyCheckbox');
                 const serverOnly = serverOnlyCheckbox ? serverOnlyCheckbox.checked : false;
                 const response = await fetch('/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url, quality: quality, server_only: serverOnly })
+                    body: JSON.stringify({ url: url, quality: quality, download_type: downloadType, server_only: serverOnly })
                 });
 
                 if (!response.ok) throw new Error("Failed to start download");

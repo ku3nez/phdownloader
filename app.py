@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, send_file, jsonify
-from downloader import download_video
+from downloader import download_media
 import os
 import threading
 import uuid
@@ -49,7 +49,7 @@ def cleanup_downloads():
 cleanup_thread = threading.Thread(target=cleanup_downloads, daemon=True)
 cleanup_thread.start()
 
-def background_download(task_id, url, quality, server_only=False):
+def background_download(task_id, url, quality, download_type='video', server_only=False):
     def update_progress(info):
         if info['type'] == 'progress':
             tasks[task_id]['progress'] = info['percentage']
@@ -61,7 +61,7 @@ def background_download(task_id, url, quality, server_only=False):
             print(f"[{task_id}] Status: {info['msg']}")
 
     try:
-        filename = download_video(url, output_path='downloads', quality=quality, progress_callback=update_progress)
+        filename = download_media(url, output_path='downloads', quality=quality, media_type=download_type, progress_callback=update_progress)
         if filename and os.path.exists(filename):
             if server_only:
                 server_filename = os.path.join(os.path.dirname(filename), '[SERVER] ' + os.path.basename(filename))
@@ -93,12 +93,22 @@ def start_download():
         return jsonify({"error": "URL is required"}), 400
     
     quality = request.json.get('quality', DEFAULT_VIDEO_QUALITY)
+    download_type = request.json.get('download_type', 'video')
     server_only = request.json.get('server_only', False)
     
     task_id = str(uuid.uuid4())
-    tasks[task_id] = {"status": "processing", "progress": 0, "filename": None, "error": None, "details": {}, "logs": [], "server_only": server_only}
+    tasks[task_id] = {
+        "status": "processing", 
+        "progress": 0, 
+        "filename": None, 
+        "error": None, 
+        "details": {}, 
+        "logs": [], 
+        "server_only": server_only,
+        "download_type": download_type
+    }
     
-    thread = threading.Thread(target=background_download, args=(task_id, url, quality, server_only))
+    thread = threading.Thread(target=background_download, args=(task_id, url, quality, download_type, server_only))
     thread.start()
     
     return jsonify({"task_id": task_id})

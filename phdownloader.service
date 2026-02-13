@@ -8,6 +8,9 @@ WorkingDirectory=/opt/phdownloader
 ExecStart=/usr/bin/python3 app.py
 Restart=always
 RestartSec=3
+StandardOutput=append:/var/log/phdownloader.log
+StandardError=append:/var/log/phdownloader.log
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target

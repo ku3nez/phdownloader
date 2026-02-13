@@ -7,7 +7,7 @@ try:
 except ImportError:
     ImpersonateTarget = None
 
-def download_video(url, output_path='downloads', quality='720', progress_callback=None):
+def download_media(url, output_path='downloads', quality='720', media_type='video', progress_callback=None):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
@@ -50,19 +50,7 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
                 }
                 progress_callback(progress_info)
 
-    # Format mapping for better control
-    if quality == 'best':
-        format_str = 'bestvideo+bestaudio/best'
-    else:
-        # Try to get the specific resolution or the next best thing below it
-        format_str = f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]'
-
-    quality_suffix = f"_{quality}p" if quality != 'best' else "_best"
-    
     ydl_opts = {
-        'format': format_str,
-        'outtmpl': os.path.join(output_path, f'%(title)s{quality_suffix}.%(ext)s'),
-        'merge_output_format': 'mp4',
         'noplaylist': True,
         'quiet': False,
         'logger': YdlLogger(),
@@ -70,7 +58,7 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
         'retries': 15,
         'fragment_retries': 15,
         'socket_timeout': 60,
-        'nocontinue': False, # Allow resume if possible, though 'nocontinue': True was there before
+        'nocontinue': False,
         'hls_prefer_native': True,
         'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else 'chrome',
         'http_headers': {
@@ -81,17 +69,46 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
         'progress_hooks': [hook],
     }
 
+    if media_type == 'audio':
+        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }]
+        ydl_opts['outtmpl'] = os.path.join(output_path, '%(title)s_audio.%(ext)s')
+    else:
+        # Format mapping for better control
+        if quality == 'best':
+            format_str = 'bestvideo+bestaudio/best'
+        else:
+            # Try to get the specific resolution or the next best thing below it
+            format_str = f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]'
+
+        quality_suffix = f"_{quality}p" if quality != 'best' else "_best"
+        ydl_opts['format'] = format_str
+        ydl_opts['outtmpl'] = os.path.join(output_path, f'%(title)s{quality_suffix}.%(ext)s')
+        ydl_opts['merge_output_format'] = 'mp4'
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-            # If it was merged, the extension might have changed to mp4
-            if not os.path.exists(filename):
+            
+            if media_type == 'audio':
+                # Extension will be .mp3 after post-processing
                 base, _ = os.path.splitext(filename)
-                if os.path.exists(base + '.mp4'):
-                    filename = base + '.mp4'
+                if os.path.exists(base + '.mp3'):
+                    filename = base + '.mp3'
+            else:
+                # If it was merged, the extension might have changed to mp4
+                if not os.path.exists(filename):
+                    base, _ = os.path.splitext(filename)
+                    if os.path.exists(base + '.mp4'):
+                        filename = base + '.mp4'
             return filename
     except Exception as e:
+
         error_msg = f"{str(e)}"
         if not error_msg.strip():
             error_msg = f"Unknown Error: {type(e).__name__}"
@@ -113,4 +130,4 @@ if __name__ == "__main__":
     else:
         video_url = sys.argv[1]
     
-    download_video(video_url)
+    download_media(video_url)
