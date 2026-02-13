@@ -70,7 +70,8 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     }
 
     if media_type == 'audio':
-        ydl_opts['format'] = 'bestaudio/best'
+        # Prefer standalone audio, if not available, grab the lowest resolution video to save bandwidth
+        ydl_opts['format'] = 'bestaudio/best[height<=360]/best'
         ydl_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
