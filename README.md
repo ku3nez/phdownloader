@@ -8,24 +8,25 @@ A web-based video downloader powered by Flask and `yt-dlp`. Supports a video hos
 | :---: | :---: |
 | <img src="https://github.com/user-attachments/assets/a2adf751-3585-4a11-8cb1-fa8bf2a6dcfb" width="400"> | <img src="https://github.com/user-attachments/assets/c7dcf90c-53ba-49a6-b447-79828ec3478a" width="400"> |
 
-## Features
-
-### 1. Broad Website Support
+### 1. Broad Website Support & Formats
 *   **Universal Downloader**: Leveraging `yt-dlp` to support hundreds of video platforms.
-*   **YouTube Optimization**: Specifically configured to bypass modern streaming restrictions (SABR/403 Forbidden errors) using optimized client arguments.
+*   **Audio Extraction**: Ability to download only the audio track in **MP3 (192kbps)** format.
+*   **Format Selection**: Toggle between **Video (MP4)** and **Audio (MP3)** with a single click.
+*   **Optimization**: When downloading audio, the script automatically uses low-bandwidth streams to save time and server resources.
 
-### 2. Quality Control
+### 2. Quality & Stability
 *   **Resolution Selection**: Choose from various qualities including **360p**, **480p**, **720p**, **1080p**, or **Best Available**.
-*   **Smart Naming**: Downloaded files are automatically named with their quality suffix (e.g., `VideoTitle_1080p.mp4`) for easy identification.
+*   **Concurrent Task Isolation**: Every download is isolated in its own unique task directory, preventing filename collisions and errors during simultaneous downloads.
+*   **Enhanced Resilience**: Configured with exponential backoff and increased retry logic (30 retries) to handle network instabilities and `502 Bad Gateway` errors.
 
 ### 3. Flexible Download Modes
-*   **Standard Mode**: Downloads the video to the server first, then automatically triggers a download in your browser. Standard downloads are automatically cleaned up after 5 minutes to save storage.
-*   **Server-Only Mode**: Save files directly to the server's `downloads/` directory. These files are marked with a `[SERVER]` prefix and are **excluded from automatic deletion**, making them permanent until manual removal.
+*   **Standard Mode**: Downloads to a task-specific folder on the server, then triggers a browser download. Files are automatically cleaned up after 5 minutes.
+*   **Server-Only Mode**: Permanent storage on the server in the `downloads/` directory, excluded from automatic cleanup.
 
 ### 4. Interactive UI
-*   **Real-Time Progress**: Track download speed, percentage, total size, and estimated time remaining.
-*   **Live Logs**: View detailed technical logs directly in the browser during the extraction and download process.
-*   **Localization**: Automated UI translation between **English** and **Russian** based on your browser's language settings.
+*   **Real-Time Progress**: Track download speed, percentage, size, and ETA.
+*   **Live Logs**: Full transparency with technical log streaming directly to the browser.
+*   **Localization**: Full support for **English** and **Russian**.
 
 ## Installation & Setup
 
@@ -34,11 +35,12 @@ A web-based video downloader powered by Flask and `yt-dlp`. Supports a video hos
     git clone <repository-url>
     cd phdownloader
     ```
-2.  **Install dependencies**:
+2.  **External Dependencies**: Ensure `ffmpeg` is installed on your system for audio extraction.
+3.  **Install Python dependencies**:
     ```bash
     pip install -r requirements.txt
     ```
-3.  **Run the application**:
+4.  **Run the application**:
     ```bash
     python app.py
     ```
@@ -62,5 +64,5 @@ The project includes a `phdownloader.service` template for permanent deployment 
 ## Development
 
 *   **Backend**: Python (Flask, Threading)
-*   **Engine**: yt-dlp
+*   **Engine**: yt-dlp, FFmpeg
 *   **Frontend**: Vanilla JS, HTML5, CSS3
