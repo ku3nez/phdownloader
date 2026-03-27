@@ -39,6 +39,7 @@ def cleanup_downloads():
                         
                         # Protect active tasks from cleanup
                         if item in tasks and tasks[item].get('status') == 'processing':
+                            print(f"Cleanup: Skipping active task {item}")
                             continue
 
                         file_age = now - os.path.getmtime(item_path)
