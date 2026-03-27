@@ -2,6 +2,10 @@ import yt_dlp
 import sys
 import os
 import traceback
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 try:
     from yt_dlp.networking.impersonate import ImpersonateTarget
 except ImportError:
@@ -59,6 +63,9 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
 
     quality_suffix = f"_{quality}p" if quality != 'best' else "_best"
     
+    cookies_browser = os.getenv('YT_DLP_COOKIES_BROWSER')
+    js_runtime = os.getenv('YT_DLP_JS_RUNTIME')
+
     ydl_opts = {
         'format': format_str,
         'outtmpl': os.path.join(output_path, f'%(title)s{quality_suffix}.%(ext)s'),
@@ -79,6 +86,8 @@ def download_video(url, output_path='downloads', quality='720', progress_callbac
             'Referer': 'https://www.pornhub.com/',
         },
         'progress_hooks': [hook],
+        'cookiesfrombrowser': (cookies_browser,) if cookies_browser else None,
+        'js_runtimes': {js_runtime: {}} if js_runtime else None,
     }
 
     try:
