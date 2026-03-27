@@ -154,76 +154,65 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         ydl_opts['outtmpl'] = os.path.join(output_path, f'%(title)s{quality_suffix}.%(ext)s')
         ydl_opts['merge_output_format'] = 'mp4'
 
-    if media_type == 'transcript':
-        # Prepare for subtitle extraction
+    if media_type == 'subtitles':
+        # Prepare for subtitle extraction only
         ydl_opts['writesubtitles'] = True
         ydl_opts['writeautomaticsubtitles'] = True
         ydl_opts['subtitleslangs'] = ['ru', 'en']
-        ydl_opts['skip_download'] = True # We'll start by trying to just get subtitles
+        ydl_opts['skip_download'] = True
         ydl_opts['outtmpl'] = os.path.join(output_path, '%(title)s.%(ext)s')
+    
+    if media_type == 'transcript':
+        # Prepare for whisper transcription - we need the audio
+        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '128',
+        }]
+        ydl_opts['outtmpl'] = os.path.join(output_path, '%(title)s_audio.%(ext)s')
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
             
-            if media_type == 'transcript':
-                # Check if subtitles were downloaded
+            filename = ydl.prepare_filename(info)
+            
+            if media_type == 'subtitles':
+                # Check for subtitles
                 subtitle_files = []
                 base_name, _ = os.path.splitext(filename)
-                
-                # Look for downloaded subtitle files (.vtt)
-                for ext in ['.ru.vtt', '.en.vtt', '.ru.vtt', '.en.vtt']: # yt-dlp might add lang codes
-                    for f in os.listdir(output_path):
-                        if f.startswith(os.path.basename(base_name)) and f.endswith('.vtt'):
-                            subtitle_files.append(os.path.join(output_path, f))
+                for f in os.listdir(output_path):
+                    if f.startswith(os.path.basename(base_name)) and f.endswith('.vtt'):
+                        subtitle_files.append(os.path.join(output_path, f))
                 
                 if subtitle_files:
-                    if progress_callback:
-                        progress_callback({'type': 'status', 'msg': "Subtitles found, extracting text..."})
-                    
-                    transcript_path = base_name + "_transcript.txt"
-                    # Use the first one found
+                    transcript_path = base_name + "_subtitles.txt"
                     clean_text = clean_vtt(subtitle_files[0])
                     with open(transcript_path, 'w', encoding='utf-8') as f:
                         f.write(clean_text)
-                    
-                    # Cleanup VTT files
                     for f in subtitle_files:
                         try: os.remove(f)
                         except: pass
-                    
                     return transcript_path
                 else:
-                    if progress_callback:
-                        progress_callback({'type': 'status', 'msg': "No subtitles found. Falling back to Whisper AI..."})
-                    
-                    # Need to download audio now
-                    audio_ydl_opts = ydl_opts.copy()
-                    audio_ydl_opts['skip_download'] = False
-                    audio_ydl_opts['format'] = 'bestaudio/best'
-                    audio_ydl_opts['postprocessors'] = [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '128',
-                    }]
-                    
-                    with yt_dlp.YoutubeDL(audio_ydl_opts) as audio_ydl:
-                        audio_info = audio_ydl.extract_info(url, download=True)
-                        audio_file = audio_ydl.prepare_filename(audio_info)
-                        # Adjustment for audio extension
-                        base, _ = os.path.splitext(audio_file)
-                        if os.path.exists(base + '.mp3'):
-                            audio_file = base + '.mp3'
-                        
-                        transcript_path = base + "_transcript.txt"
-                        transcribe_with_whisper(audio_file, transcript_path)
-                        
-                        # Cleanup audio file after transcription
-                        try: os.remove(audio_file)
-                        except: pass
-                        
-                        return transcript_path
+                    raise Exception("No subtitles found on YouTube for this video.")
+
+            if media_type == 'transcript':
+                # Use Whisper on the downloaded audio
+                base, _ = os.path.splitext(filename)
+                if os.path.exists(base + '.mp3'):
+                    filename = base + '.mp3'
+                
+                transcript_path = base + "_transcript.txt"
+                transcribe_with_whisper(filename, transcript_path)
+                
+                # Cleanup audio file after transcription
+                try: os.remove(filename)
+                except: pass
+                
+                return transcript_path
 
             if media_type == 'audio':
                 # Extension will be .mp3 after post-processing
