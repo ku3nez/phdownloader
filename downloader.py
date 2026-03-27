@@ -73,9 +73,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcribing audio..."})
             
-        # beam_size=2: decent accuracy while being faster than 5
-        # vad_filter=True: skips silent parts to save CPU and time
-        segments, _ = model.transcribe(audio_path, beam_size=2, vad_filter=True)
+        # beam_size=5: high accuracy
+        # vad_filter=False: ensure no speech is accidentally cut
+        segments, _ = model.transcribe(audio_path, beam_size=5, vad_filter=False)
     
         with open(output_path, "w", encoding="utf-8") as f:
             for segment in segments:
