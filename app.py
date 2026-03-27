@@ -39,7 +39,12 @@ def cleanup_downloads():
                         
                         # Protect active tasks from cleanup
                         if item in tasks and tasks[item].get('status') == 'processing':
-                            print(f"Cleanup: Skipping active task {item}")
+                            print(f"Cleanup: Skipping active task {item} (in-memory)")
+                            continue
+                        
+                        # Process-independent check: skip directories with an .active file
+                        if os.path.isdir(item_path) and os.path.exists(os.path.join(item_path, '.active')):
+                            print(f"Cleanup: Skipping active task {item} (file-marker)")
                             continue
 
                         file_age = now - os.path.getmtime(item_path)
@@ -77,7 +82,14 @@ def background_download(task_id, url, quality, download_type='video', server_onl
         if not os.path.exists(task_dir):
             os.makedirs(task_dir)
 
+        # Create active marker
+        active_marker = os.path.join(task_dir, '.active')
+        with open(active_marker, 'w') as f: f.write('active')
+
         filename = download_media(url, output_path=task_dir, quality=quality, media_type=download_type, progress_callback=update_progress)
+        
+        # Remove active marker
+        if os.path.exists(active_marker): os.remove(active_marker)
         print(f"[{task_id}] download_media returned: {filename}")
         
         if filename and os.path.exists(filename):
