@@ -61,45 +61,56 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         except Exception as e:
             return f"Error cleaning VTT: {e}"
 
-    def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='base'):
+    def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='base', total_duration=0):
         """Transcribe audio file using Whisper AI with optional formatting."""
         if progress_callback:
-            progress_callback({'type': 'status', 'msg': "Initializing Whisper AI (this may take a moment)..."})
+            progress_callback({'type': 'status', 'msg': f"Initializing Whisper AI ({model_size})..."})
         
         from faster_whisper import WhisperModel
-        from tqdm import tqdm
         
-        # Using specified model size for a good balance of speed and accuracy on CPU
-        # Optimized for 2-core server: cpu_threads=2
-        model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=2)
-        
-        if progress_callback:
-            progress_callback({'type': 'status', 'msg': "Transcribing audio..."})
+        try:
+            model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=2)
             
-        # beam_size=5: high accuracy
-        # vad_filter=False: ensure no speech is accidentally cut
-        segments, _ = model.transcribe(audio_path, beam_size=5, vad_filter=False)
-    
-        with open(output_path, "w", encoding="utf-8") as f:
-            first_segment = True
-            for segment in segments:
-                text_part = segment.text.strip()
-                if not text_part:
-                    continue
-                    
-                if structured:
-                    timestamp = f"[{int(segment.start // 60):02d}:{int(segment.start % 60):02d}] "
-                    f.write(f"{timestamp}{text_part}\n")
-                    if text_part.endswith(('.', '!', '?')):
-                        f.write("\n")
-                else:
-                    if not first_segment:
-                        f.write(" ")
-                    f.write(text_part)
-                    first_segment = False
+            if progress_callback:
+                progress_callback({'type': 'status', 'msg': "Transcribing audio..."})
+                
+            segments, _ = model.transcribe(audio_path, beam_size=5, vad_filter=False)
         
-        if progress_callback:
-            progress_callback({'type': 'status', 'msg': "Transcription complete."})
+            with open(output_path, "w", encoding="utf-8") as f:
+                first_segment = True
+                for segment in segments:
+                    text_part = segment.text.strip()
+                    if not text_part:
+                        continue
+                        
+                    if structured:
+                        timestamp = f"[{int(segment.start // 60):02d}:{int(segment.start % 60):02d}] "
+                        f.write(f"{timestamp}{text_part}\n")
+                        if text_part.endswith(('.', '!', '?')):
+                            f.write("\n")
+                    else:
+                        if not first_segment:
+                            f.write(" ")
+                        f.write(text_part)
+                        first_segment = False
+                    
+                    # Send progress update based on audio duration
+                    if progress_callback and total_duration > 0:
+                        percent = min(99, (segment.end / total_duration) * 100)
+                        cur_min, cur_sec = int(segment.end // 60), int(segment.end % 60)
+                        tot_min, tot_sec = int(total_duration // 60), int(total_duration % 60)
+                        progress_callback({
+                            'type': 'progress',
+                            'percentage': percent,
+                            'status_msg': f"Transcribing: {cur_min:02d}:{cur_sec:02d} / {tot_min:02d}:{tot_sec:02d}"
+                        })
+            
+            if progress_callback:
+                progress_callback({'type': 'status', 'msg': "Transcription complete."})
+        except Exception as e:
+            if progress_callback:
+                progress_callback({'type': 'status', 'msg': f"Transcription error: {str(e)}"})
+            raise e
         
         return output_path
 
@@ -245,7 +256,8 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                     filename = base + '.mp3'
                 
                 transcript_path = base + "_transcript.txt"
-                transcribe_with_whisper(filename, transcript_path, structured=structured, model_size=model_size)
+                duration = info.get('duration', 0)
+                transcribe_with_whisper(filename, transcript_path, structured=structured, model_size=model_size, total_duration=duration)
                 
                 # Cleanup audio file after transcription
                 try: os.remove(filename)

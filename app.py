@@ -70,6 +70,8 @@ def background_download(task_id, url, quality, download_type='video', structured
         if info['type'] == 'progress':
             tasks[task_id]['progress'] = info['percentage']
             tasks[task_id]['details'] = info
+            if 'status_msg' in info:
+                tasks[task_id]['current_status'] = info['status_msg']
         elif info['type'] == 'status':
             tasks[task_id]['logs'].append(info['msg'])
             tasks[task_id]['logs'] = tasks[task_id]['logs'][-20:]  # Keep last 20 lines
@@ -140,6 +142,7 @@ def start_download():
         "error": None, 
         "details": {}, 
         "logs": [], 
+        "current_status": "Starting...",
         "server_only": server_only,
         "structured": structured,
         "model_size": model_size,
