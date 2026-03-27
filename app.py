@@ -13,8 +13,6 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
 
-print(f"DEBUG: App starting. PID: {os.getpid()}")
-
 # Global dictionary to store task status
 tasks = {}
 
@@ -24,14 +22,13 @@ ENABLE_SAVE_ON_SERVER = os.getenv('ENABLE_SAVE_ON_SERVER', 'False').lower() == '
 DEFAULT_VIDEO_QUALITY = os.getenv('DEFAULT_VIDEO_QUALITY', '720')
 APP_PORT = int(os.getenv('PORT', 5008))
 CLEANUP_INTERVAL_SECONDS = 60  # 1 minute
-DOWNLOAD_BASE_DIR = 'vdl_data' # Changed from 'downloads' to avoid ghost processes
 
 def cleanup_downloads():
     """Background task to delete old files and folders from the downloads folder."""
     while True:
         try:
             now = time.time()
-            download_dir = DOWNLOAD_BASE_DIR
+            download_dir = 'downloads'
             if os.path.exists(download_dir):
                 for item in os.listdir(download_dir):
                     item_path = os.path.join(download_dir, item)
@@ -81,7 +78,7 @@ def background_download(task_id, url, quality, download_type='video', server_onl
 
     try:
         # Create a task-specific subdirectory to avoid filename collisions
-        task_dir = os.path.join(DOWNLOAD_BASE_DIR, task_id)
+        task_dir = os.path.join('downloads', task_id)
         if not os.path.exists(task_dir):
             os.makedirs(task_dir)
 
