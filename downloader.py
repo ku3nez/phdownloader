@@ -83,6 +83,12 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'js_runtimes': {js_runtime: {}} if js_runtime else None,
     }
 
+    # Debug logging for cookie configuration
+    print(f"DEBUG: cookie_file: {cookie_file} (exists: {os.path.exists(cookie_file) if cookie_file else 'N/A'})")
+    print(f"DEBUG: cookies_browser: {cookies_browser}")
+    print(f"DEBUG: Final ydl_opts['cookiesfrombrowser']: {ydl_opts.get('cookiesfrombrowser')}")
+    print(f"DEBUG: Final ydl_opts['cookiefile']: {ydl_opts.get('cookiefile')}")
+
     if media_type == 'audio':
         # Prefer standalone audio, if not available, grab the lowest resolution video to save bandwidth
         ydl_opts['format'] = 'bestaudio/best[height<=360]/best'
