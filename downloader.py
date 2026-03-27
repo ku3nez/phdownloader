@@ -81,22 +81,22 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         segments, _ = model.transcribe(audio_path, beam_size=5, vad_filter=False)
     
         with open(output_path, "w", encoding="utf-8") as f:
+            first_segment = True
             for segment in segments:
-                # Format timestamp [MM:SS]
+                text_part = segment.text.strip()
+                if not text_part:
+                    continue
+                    
                 if structured:
-                    start_min = int(segment.start // 60)
-                    start_sec = int(segment.start % 60)
-                    timestamp = f"[{start_min:02d}:{start_sec:02d}] "
-                    
-                    # Write timestamp and text with a newline
-                    f.write(f"{timestamp}{segment.text.strip()}\n")
-                    
-                    # Add an extra newline for potential paragraph breaks if the sentence looks complete
-                    if segment.text.strip().endswith(('.', '!', '?')):
+                    timestamp = f"[{int(segment.start // 60):02d}:{int(segment.start % 60):02d}] "
+                    f.write(f"{timestamp}{text_part}\n")
+                    if text_part.endswith(('.', '!', '?')):
                         f.write("\n")
                 else:
-                    # Plain text: just space between segments
-                    f.write(segment.text.strip() + " ")
+                    if not first_segment:
+                        f.write(" ")
+                    f.write(text_part)
+                    first_segment = False
         
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcription complete."})

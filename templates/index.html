@@ -458,17 +458,25 @@
                     console.error(e);
                 }
             }, 1000);
+        }
+
         // Show/hide structured option based on format
+        function updateStructuredOptionVisibility() {
+            const radio = document.querySelector('input[name="format"]:checked');
+            const structuredOption = document.getElementById('structured-option');
+            if (radio && (radio.value === 'subtitles' || radio.value === 'transcript')) {
+                structuredOption.style.display = 'block';
+            } else {
+                structuredOption.style.display = 'none';
+            }
+        }
+
         document.querySelectorAll('input[name="format"]').forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                const structuredOption = document.getElementById('structured-option');
-                if (e.target.value === 'subtitles' || e.target.value === 'transcript') {
-                    structuredOption.style.display = 'block';
-                } else {
-                    structuredOption.style.display = 'none';
-                }
-            });
+            radio.addEventListener('change', updateStructuredOptionVisibility);
         });
+
+        // Initialize visibility on load
+        document.addEventListener('DOMContentLoaded', updateStructuredOptionVisibility);
     </script>
 </body>
 
