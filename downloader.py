@@ -56,6 +56,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
 
     cookies_browser = os.getenv('YT_DLP_COOKIES_BROWSER')
     js_runtime = os.getenv('YT_DLP_JS_RUNTIME')
+    cookie_file = os.getenv('YT_DLP_COOKIE_FILE')
     ydl_opts = {
         'noplaylist': True,
         'quiet': False,
@@ -78,6 +79,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         },
         'progress_hooks': [hook],
         'cookiesfrombrowser': (cookies_browser,) if cookies_browser else None,
+        'cookiefile': cookie_file if cookie_file and os.path.exists(cookie_file) else None,
         'js_runtimes': {js_runtime: {}} if js_runtime else None,
     }
 
