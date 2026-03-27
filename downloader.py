@@ -67,12 +67,15 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         from tqdm import tqdm
         
         # Using 'base' model for a good balance of speed and accuracy on CPU
-        model = WhisperModel("base", device="cpu", compute_type="int8")
+        # Optimized for 2-core server: cpu_threads=2
+        model = WhisperModel("base", device="cpu", compute_type="int8", cpu_threads=2)
         
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcribing audio..."})
             
-        segments, _ = model.transcribe(audio_path, beam_size=5)
+        # beam_size=2: decent accuracy while being faster than 5
+        # vad_filter=True: skips silent parts to save CPU and time
+        segments, _ = model.transcribe(audio_path, beam_size=2, vad_filter=True)
     
         with open(output_path, "w", encoding="utf-8") as f:
             for segment in segments:
