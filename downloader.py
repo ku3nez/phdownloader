@@ -17,24 +17,44 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
 
     import re
     def clean_vtt(vtt_path):
-        """Simple cleaner for VTT files to get plain text."""
+        """Simple parser to convert VTT to clean text with timestamps."""
+        import re
+        clean_lines = []
+        last_timestamp = ""
+        
         try:
             with open(vtt_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            text_lines = []
-            for line in lines:
-                line = line.strip()
-                # Skip VTT headers, timestamps, and common metadata
-                if not line or line.startswith('WEBVTT') or line.startswith('Kind:') or line.startswith('Language:') or '-->' in line or line.isdigit():
-                    continue
-                # Remove HTML-like tags (e.g., <c>)
-                line = re.sub(r'<[^>]+>', '', line)
-                # Avoid exact duplicate consecutive lines (common in VTT)
-                if not text_lines or text_lines[-1] != line:
-                    text_lines.append(line)
-            
-            return ' '.join(text_lines)
+                for line in f:
+                    # Look for timestamp line: 00:00:05.120 --> 00:00:10.000
+                    ts_match = re.search(r'(\d{2}):(\d{2}):(\d{2})\.\d{3} -->', line)
+                    if ts_match:
+                        h, m, s = ts_match.groups()
+                        if int(h) > 0:
+                            last_timestamp = f"[{h}:{m}:{s}] "
+                        else:
+                            last_timestamp = f"[{m}:{s}] "
+                        continue
+
+                    line = line.strip()
+                    # Skip numeric lines and VTT headers
+                    if not line or line.isdigit() or line.upper() == 'WEBVTT' or line.startswith('NOTE'):
+                        continue
+                    
+                    # If we have a timestamp for this line, use it
+                    if last_timestamp:
+                        clean_lines.append(f"{last_timestamp}{line}")
+                        last_timestamp = "" # Use it once per block
+                        # Add paragraph break if line ends with sentence terminator
+                        if line.endswith(('.', '!', '?')):
+                            clean_lines.append("")
+                    else:
+                        # Append to previous line if no new timestamp
+                        if clean_lines and clean_lines[-1] != "" and not clean_lines[-1].startswith('['): # Don't append to timestamped lines
+                            clean_lines[-1] = clean_lines[-1] + " " + line
+                        else:
+                            clean_lines.append(line)
+
+            return "\n".join(clean_lines)
         except Exception as e:
             return f"Error cleaning VTT: {e}"
 
@@ -52,12 +72,21 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcribing audio..."})
             
-        segments, info = model.transcribe(audio_path, beam_size=5)
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            # Note: segments is a generator, so we iterate through it
+        segments, _ = model.transcribe(audio_path, beam_size=5)
+    
+        with open(output_path, "w", encoding="utf-8") as f:
             for segment in segments:
-                f.write(segment.text + " ")
+                # Format timestamp [MM:SS]
+                start_min = int(segment.start // 60)
+                start_sec = int(segment.start % 60)
+                timestamp = f"[{start_min:02d}:{start_sec:02d}] "
+                
+                # Write timestamp and text with a newline
+                f.write(f"{timestamp}{segment.text.strip()}\n")
+                
+                # Add an extra newline for potential paragraph breaks if the sentence looks complete
+                if segment.text.strip().endswith(('.', '!', '?')):
+                    f.write("\n")
         
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcription complete."})
