@@ -71,17 +71,23 @@ def background_download(task_id, url, quality, download_type='video', server_onl
             os.makedirs(task_dir)
 
         filename = download_media(url, output_path=task_dir, quality=quality, media_type=download_type, progress_callback=update_progress)
+        print(f"[{task_id}] download_media returned: {filename}")
+        
         if filename and os.path.exists(filename):
+            print(f"[{task_id}] File exists at: {filename}")
             if server_only:
                 server_filename = os.path.join(os.path.dirname(filename), '[SERVER] ' + os.path.basename(filename))
                 os.rename(filename, server_filename)
                 filename = server_filename
+                print(f"[{task_id}] Renamed for server-only: {filename}")
             
             tasks[task_id]['status'] = 'completed'
             tasks[task_id]['filename'] = filename
             tasks[task_id]['progress'] = 100
             tasks[task_id]['server_only'] = server_only
+            print(f"[{task_id}] Task completed successfully.")
         else:
+            print(f"[{task_id}] File NOT found or filename is None. Exists: {os.path.exists(filename) if filename else 'N/A'}")
             tasks[task_id]['status'] = 'failed'
             if not tasks[task_id].get('error'):
                 tasks[task_id]['error'] = 'Download failed'
