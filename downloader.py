@@ -195,7 +195,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                     for f in subtitle_files:
                         try: os.remove(f)
                         except: pass
-                    return transcript_path
+                    return os.path.abspath(transcript_path)
                 else:
                     raise Exception("No subtitles found on YouTube for this video.")
 
@@ -212,7 +212,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                 try: os.remove(filename)
                 except: pass
                 
-                return transcript_path
+                return os.path.abspath(transcript_path)
 
             if media_type == 'audio':
                 # Extension will be .mp3 after post-processing
@@ -225,7 +225,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                     base, _ = os.path.splitext(filename)
                     if os.path.exists(base + '.mp4'):
                         filename = base + '.mp4'
-            return filename
+            return os.path.abspath(filename)
     except Exception as e:
         # General cleanup try for any partial files
         pass

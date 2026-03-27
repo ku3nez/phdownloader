@@ -17,7 +17,7 @@ app.secret_key = 'supersecretkey'
 tasks = {}
 
 # Configuration from .env
-FILE_EXPIRATION_SECONDS = int(os.getenv('FILE_EXPIRATION_SECONDS', 300))
+FILE_EXPIRATION_SECONDS = int(os.getenv('FILE_EXPIRATION_SECONDS', 600))
 ENABLE_SAVE_ON_SERVER = os.getenv('ENABLE_SAVE_ON_SERVER', 'False').lower() == 'true'
 DEFAULT_VIDEO_QUALITY = os.getenv('DEFAULT_VIDEO_QUALITY', '720')
 APP_PORT = int(os.getenv('PORT', 5008))
@@ -33,10 +33,16 @@ def cleanup_downloads():
                 for item in os.listdir(download_dir):
                     item_path = os.path.join(download_dir, item)
                     try:
+                        # Skip special [SERVER] files or active tasks
+                        if item.startswith('[SERVER]'):
+                            continue
+                        
+                        # Protect active tasks from cleanup
+                        if item in tasks and tasks[item].get('status') == 'processing':
+                            continue
+
                         file_age = now - os.path.getmtime(item_path)
                         if file_age > FILE_EXPIRATION_SECONDS:
-                            if item.startswith('[SERVER]'):
-                                continue
                             if os.path.isfile(item_path):
                                 os.remove(item_path)
                                 print(f"Deleted old file: {item_path}")
