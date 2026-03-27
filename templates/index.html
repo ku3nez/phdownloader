@@ -266,6 +266,16 @@
                     </label>
                 </div>
             </div>
+            <div id="ai-options" style="margin-bottom: 20px; display: none;">
+                <label for="modelSelect" style="font-size: 14px; color: #aaa; margin-right: 10px;">Whisper Model:</label>
+                <select id="modelSelect"
+                    style="padding: 8px; border-radius: 5px; background-color: #2c2c2c; color: #fff; border: 1px solid #333;">
+                    <option value="tiny">Tiny (Fastest)</option>
+                    <option value="base" selected>Base (Default)</option>
+                    <option value="small">Small (Better)</option>
+                    <option value="medium">Medium (Best, Slow)</option>
+                </select>
+            </div>
             <div id="structured-option" style="margin-bottom: 20px; display: none;">
                 <label style="cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #aaa;">
                     <input type="checkbox" id="structuredToggle" checked style="margin-right: 8px; cursor: pointer;">
@@ -329,6 +339,17 @@
 
                 const structuredLabel = document.querySelector('#structured-option label');
                 if (structuredLabel) structuredLabel.lastChild.textContent = ' Структурировать (таймкоды)';
+
+                const modelLabel = document.querySelector('label[for="modelSelect"]');
+                if (modelLabel) modelLabel.textContent = 'Модель Whisper:';
+                
+                const modelSelect = document.getElementById('modelSelect');
+                if (modelSelect) {
+                    modelSelect.options[0].textContent = 'Tiny (Самая быстрая)';
+                    modelSelect.options[1].textContent = 'Base (Обычная)';
+                    modelSelect.options[2].textContent = 'Small (Точная)';
+                    modelSelect.options[3].textContent = 'Medium (Лучшая, но медленно)';
+                }
             } else if (isRussian) {
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
                 document.getElementById('downloadBtn').textContent = 'Скачать';
@@ -351,6 +372,17 @@
 
                 const structuredLabel = document.querySelector('#structured-option label');
                 if (structuredLabel) structuredLabel.lastChild.textContent = ' Структурировать (таймкоды)';
+
+                const modelLabel = document.querySelector('label[for="modelSelect"]');
+                if (modelLabel) modelLabel.textContent = 'Модель Whisper:';
+                
+                const modelSelect = document.getElementById('modelSelect');
+                if (modelSelect) {
+                    modelSelect.options[0].textContent = 'Tiny (Самая быстрая)';
+                    modelSelect.options[1].textContent = 'Base (Обычная)';
+                    modelSelect.options[2].textContent = 'Small (Точная)';
+                    modelSelect.options[3].textContent = 'Medium (Лучшая, но медленно)';
+                }
             }
         });
 
@@ -392,6 +424,7 @@
                         quality: quality,
                         download_type: format,
                         structured: document.getElementById('structuredToggle').checked,
+                        model_size: document.getElementById('modelSelect').value,
                         server_only: saveOnServer
                     })
                 });
@@ -464,10 +497,18 @@
         function updateStructuredOptionVisibility() {
             const radio = document.querySelector('input[name="format"]:checked');
             const structuredOption = document.getElementById('structured-option');
+            const aiOptions = document.getElementById('ai-options');
+            
             if (radio && (radio.value === 'subtitles' || radio.value === 'transcript')) {
                 structuredOption.style.display = 'block';
             } else {
                 structuredOption.style.display = 'none';
+            }
+            
+            if (radio && radio.value === 'transcript') {
+                aiOptions.style.display = 'block';
+            } else {
+                aiOptions.style.display = 'none';
             }
         }
 

@@ -11,7 +11,7 @@ try:
 except ImportError:
     ImpersonateTarget = None
 
-def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, progress_callback=None):
+def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
@@ -61,7 +61,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         except Exception as e:
             return f"Error cleaning VTT: {e}"
 
-    def transcribe_with_whisper(audio_path, output_path, structured=True):
+    def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='base'):
         """Transcribe audio file using Whisper AI with optional formatting."""
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Initializing Whisper AI (this may take a moment)..."})
@@ -69,9 +69,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         from faster_whisper import WhisperModel
         from tqdm import tqdm
         
-        # Using 'base' model for a good balance of speed and accuracy on CPU
+        # Using specified model size for a good balance of speed and accuracy on CPU
         # Optimized for 2-core server: cpu_threads=2
-        model = WhisperModel("base", device="cpu", compute_type="int8", cpu_threads=2)
+        model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=2)
         
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcribing audio..."})
@@ -245,7 +245,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                     filename = base + '.mp3'
                 
                 transcript_path = base + "_transcript.txt"
-                transcribe_with_whisper(filename, transcript_path, structured=structured)
+                transcribe_with_whisper(filename, transcript_path, structured=structured, model_size=model_size)
                 
                 # Cleanup audio file after transcription
                 try: os.remove(filename)
