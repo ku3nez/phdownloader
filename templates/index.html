@@ -266,6 +266,12 @@
                     </label>
                 </div>
             </div>
+            <div id="structured-option" style="margin-bottom: 20px; display: none;">
+                <label style="cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #aaa;">
+                    <input type="checkbox" id="structuredToggle" checked style="margin-right: 8px; cursor: pointer;">
+                    Structured (timestamps)
+                </label>
+            </div>
             {% if enable_save_on_server %}
             <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: center;">
                 <input type="checkbox" id="serverOnlyCheckbox"
@@ -320,6 +326,9 @@
 
                 const transcriptRadio = document.querySelector('input[value="transcript"]').parentElement;
                 if (transcriptRadio) transcriptRadio.lastChild.textContent = ' Транскрипция (ИИ)';
+
+                const structuredLabel = document.querySelector('#structured-option label');
+                if (structuredLabel) structuredLabel.lastChild.textContent = ' Структурировать (таймкоды)';
             } else if (isRussian) {
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
                 document.getElementById('downloadBtn').textContent = 'Скачать';
@@ -339,6 +348,9 @@
 
                 const transcriptRadio = document.querySelector('input[value="transcript"]').parentElement;
                 if (transcriptRadio) transcriptRadio.lastChild.textContent = ' Транскрипция (ИИ)';
+
+                const structuredLabel = document.querySelector('#structured-option label');
+                if (structuredLabel) structuredLabel.lastChild.textContent = ' Структурировать (таймкоды)';
             }
         });
 
@@ -369,12 +381,19 @@
             try {
                 const quality = document.getElementById('qualitySelect').value;
                 const downloadType = document.querySelector('input[name="format"]:checked').value;
+                const format = document.querySelector('input[name="format"]:checked').value;
                 const serverOnlyCheckbox = document.getElementById('serverOnlyCheckbox');
-                const serverOnly = serverOnlyCheckbox ? serverOnlyCheckbox.checked : false;
+                const saveOnServer = serverOnlyCheckbox ? serverOnlyCheckbox.checked : false;
                 const response = await fetch('/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url, quality: quality, download_type: downloadType, server_only: serverOnly })
+                    body: JSON.stringify({
+                        url: url,
+                        quality: quality,
+                        download_type: format,
+                        structured: document.getElementById('structuredToggle').checked,
+                        server_only: saveOnServer
+                    })
                 });
 
                 if (!response.ok) throw new Error("Failed to start download");
@@ -439,7 +458,17 @@
                     console.error(e);
                 }
             }, 1000);
-        }
+        // Show/hide structured option based on format
+        document.querySelectorAll('input[name="format"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const structuredOption = document.getElementById('structured-option');
+                if (e.target.value === 'subtitles' || e.target.value === 'transcript') {
+                    structuredOption.style.display = 'block';
+                } else {
+                    structuredOption.style.display = 'none';
+                }
+            });
+        });
     </script>
 </body>
 

@@ -11,13 +11,13 @@ try:
 except ImportError:
     ImpersonateTarget = None
 
-def download_media(url, output_path='downloads', quality='720', media_type='video', progress_callback=None):
+def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, progress_callback=None):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
     import re
-    def clean_vtt(vtt_path):
-        """Simple parser to convert VTT to clean text with timestamps."""
+    def clean_vtt(vtt_path, structured=True):
+        """Simple parser to convert VTT to clean text with optional timestamps."""
         import re
         clean_lines = []
         last_timestamp = ""
@@ -41,25 +41,28 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                         continue
                     
                     # If we have a timestamp for this line, use it
-                    if last_timestamp:
+                    if structured and last_timestamp:
                         clean_lines.append(f"{last_timestamp}{line}")
                         last_timestamp = "" # Use it once per block
                         # Add paragraph break if line ends with sentence terminator
                         if line.endswith(('.', '!', '?')):
                             clean_lines.append("")
-                    else:
-                        # Append to previous line if no new timestamp
-                        if clean_lines and clean_lines[-1] != "" and not clean_lines[-1].startswith('['): # Don't append to timestamped lines
-                            clean_lines[-1] = clean_lines[-1] + " " + line
+                    elif not structured:
+                        # Just append text
+                        if clean_lines and not clean_lines[-1].endswith(' '):
+                            clean_lines.append(" " + line)
                         else:
                             clean_lines.append(line)
+                    else:
+                        # Structured but no timestamp available for this line yet
+                        clean_lines.append(line)
 
-            return "\n".join(clean_lines)
+            return ("\n" if structured else " ").join(clean_lines)
         except Exception as e:
             return f"Error cleaning VTT: {e}"
 
-    def transcribe_with_whisper(audio_path, output_path):
-        """Transcribe audio file using Whisper AI."""
+    def transcribe_with_whisper(audio_path, output_path, structured=True):
+        """Transcribe audio file using Whisper AI with optional formatting."""
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Initializing Whisper AI (this may take a moment)..."})
         
@@ -80,16 +83,20 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         with open(output_path, "w", encoding="utf-8") as f:
             for segment in segments:
                 # Format timestamp [MM:SS]
-                start_min = int(segment.start // 60)
-                start_sec = int(segment.start % 60)
-                timestamp = f"[{start_min:02d}:{start_sec:02d}] "
-                
-                # Write timestamp and text with a newline
-                f.write(f"{timestamp}{segment.text.strip()}\n")
-                
-                # Add an extra newline for potential paragraph breaks if the sentence looks complete
-                if segment.text.strip().endswith(('.', '!', '?')):
-                    f.write("\n")
+                if structured:
+                    start_min = int(segment.start // 60)
+                    start_sec = int(segment.start % 60)
+                    timestamp = f"[{start_min:02d}:{start_sec:02d}] "
+                    
+                    # Write timestamp and text with a newline
+                    f.write(f"{timestamp}{segment.text.strip()}\n")
+                    
+                    # Add an extra newline for potential paragraph breaks if the sentence looks complete
+                    if segment.text.strip().endswith(('.', '!', '?')):
+                        f.write("\n")
+                else:
+                    # Plain text: just space between segments
+                    f.write(segment.text.strip() + " ")
         
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcription complete."})
@@ -221,7 +228,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                 
                 if subtitle_files:
                     transcript_path = base_name + "_subtitles.txt"
-                    clean_text = clean_vtt(subtitle_files[0])
+                    clean_text = clean_vtt(subtitle_files[0], structured=structured)
                     with open(transcript_path, 'w', encoding='utf-8') as f:
                         f.write(clean_text)
                     for f in subtitle_files:
@@ -238,7 +245,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                     filename = base + '.mp3'
                 
                 transcript_path = base + "_transcript.txt"
-                transcribe_with_whisper(filename, transcript_path)
+                transcribe_with_whisper(filename, transcript_path, structured=structured)
                 
                 # Cleanup audio file after transcription
                 try: os.remove(filename)

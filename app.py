@@ -65,7 +65,7 @@ def cleanup_downloads():
 cleanup_thread = threading.Thread(target=cleanup_downloads, daemon=True)
 cleanup_thread.start()
 
-def background_download(task_id, url, quality, download_type='video', server_only=False):
+def background_download(task_id, url, quality, download_type='video', structured=True, server_only=False):
     def update_progress(info):
         if info['type'] == 'progress':
             tasks[task_id]['progress'] = info['percentage']
@@ -86,7 +86,7 @@ def background_download(task_id, url, quality, download_type='video', server_onl
         active_marker = os.path.join(task_dir, '.active')
         with open(active_marker, 'w') as f: f.write('active')
 
-        filename = download_media(url, output_path=task_dir, quality=quality, media_type=download_type, progress_callback=update_progress)
+        filename = download_media(url, output_path=task_dir, quality=quality, media_type=download_type, structured=structured, progress_callback=update_progress)
         
         # Remove active marker
         if os.path.exists(active_marker): os.remove(active_marker)
@@ -128,6 +128,7 @@ def start_download():
     
     quality = request.json.get('quality', DEFAULT_VIDEO_QUALITY)
     download_type = request.json.get('download_type', 'video')
+    structured = request.json.get('structured', True)
     server_only = request.json.get('server_only', False)
     
     task_id = str(uuid.uuid4())
@@ -139,10 +140,11 @@ def start_download():
         "details": {}, 
         "logs": [], 
         "server_only": server_only,
+        "structured": structured,
         "download_type": download_type
     }
     
-    thread = threading.Thread(target=background_download, args=(task_id, url, quality, download_type, server_only))
+    thread = threading.Thread(target=background_download, args=(task_id, url, quality, download_type, structured, server_only))
     thread.start()
     
     return jsonify({"task_id": task_id})
