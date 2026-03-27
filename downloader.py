@@ -78,7 +78,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             'Referer': 'https://www.pornhub.com/',
         },
         'progress_hooks': [hook],
-        'cookiesfrombrowser': (cookies_browser,) if cookies_browser else None,
+        'cookiesfrombrowser': (cookies_browser,) if cookies_browser and cookies_browser.strip() and not (cookie_file and os.path.exists(cookie_file)) else None,
         'cookiefile': cookie_file if cookie_file and os.path.exists(cookie_file) else None,
         'js_runtimes': {js_runtime: {}} if js_runtime else None,
     }
