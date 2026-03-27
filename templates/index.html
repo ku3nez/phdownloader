@@ -246,15 +246,19 @@
             </div>
             <div style="margin-bottom: 20px;">
                 <label style="font-size: 14px; color: #aaa; margin-right: 10px;">Format:</label>
-                <div style="display: inline-flex; gap: 15px;">
+                <div style="display: inline-flex; gap: 15px; flex-wrap: wrap;">
                     <label style="cursor: pointer; display: flex; align-items: center; font-size: 14px;">
                         <input type="radio" name="format" value="video" checked
-                            style="margin-right: 5px; cursor: pointer;">
+                            style="margin-right: 4px; cursor: pointer;">
                         Video (MP4)
                     </label>
                     <label style="cursor: pointer; display: flex; align-items: center; font-size: 14px;">
-                        <input type="radio" name="format" value="audio" style="margin-right: 5px; cursor: pointer;">
+                        <input type="radio" name="format" value="audio" style="margin-right: 4px; cursor: pointer;">
                         Audio (MP3)
+                    </label>
+                    <label style="cursor: pointer; display: flex; align-items: center; font-size: 14px;">
+                        <input type="radio" name="format" value="transcript" style="margin-right: 4px; cursor: pointer;">
+                        Transcript (TXT)
                     </label>
                 </div>
             </div>
@@ -306,6 +310,9 @@
 
                 const audioRadio = document.querySelector('input[value="audio"]').parentElement;
                 if (audioRadio) audioRadio.lastChild.textContent = ' Аудио (MP3)';
+
+                const transcriptRadio = document.querySelector('input[value="transcript"]').parentElement;
+                if (transcriptRadio) transcriptRadio.lastChild.textContent = ' Текст (TXT)';
             } else if (isRussian) {
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
                 document.getElementById('downloadBtn').textContent = 'Скачать';
@@ -319,6 +326,9 @@
 
                 const audioRadio = document.querySelector('input[value="audio"]').parentElement;
                 if (audioRadio) audioRadio.lastChild.textContent = ' Аудио (MP3)';
+
+                const transcriptRadio = document.querySelector('input[value="transcript"]').parentElement;
+                if (transcriptRadio) transcriptRadio.lastChild.textContent = ' Текст (TXT)';
             }
         });
 
