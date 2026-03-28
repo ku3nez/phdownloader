@@ -561,7 +561,7 @@
         });
 
         // Initialize visibility on load
-        document.addEventListener('DOMContentLoaded', updateStructuredOptionVisibility);
+        // No-op here, consolidated above
 
         async function cancelDownload() {
             const taskId = localStorage.getItem('active_task_id');
