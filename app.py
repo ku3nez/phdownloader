@@ -23,7 +23,8 @@ DEFAULT_VIDEO_QUALITY = os.getenv('DEFAULT_VIDEO_QUALITY', '720')
 APP_PORT = int(os.getenv('PORT', 5008))
 CLEANUP_INTERVAL_SECONDS = 60  # 1 minute
 
-def is_russian_request():
+def is_russian_user():
+    """Helper to check if the current request context is Russian."""
     lang = request.headers.get('Accept-Language', '')
     return 'ru' in lang.lower()
 
@@ -81,18 +82,18 @@ def background_download(task_id, url, quality, download_type='video', structured
             
             # Use English headers for mapping but serve localized if we can
             # We detect language from the app context or just provide a key
-            # For simplicity, we'll map to friendly Russian/English strings
+            is_ru = tasks[task_id].get('is_russian', False)
             friendly_msg = raw_msg
             if "[download]" in raw_msg:
-                friendly_msg = "Загрузка медиа..." if is_russian_request() else "Downloading media..."
+                friendly_msg = "Загрузка медиа..." if is_ru else "Downloading media..."
             elif "[ffmpeg]" in raw_msg or "[ExtractAudio]" in raw_msg or "audio file" in raw_msg:
-                friendly_msg = "Подготовка аудио..." if is_russian_request() else "Preparing audio..."
+                friendly_msg = "Подготовка аудио..." if is_ru else "Preparing audio..."
             elif "Whisper" in raw_msg:
-                friendly_msg = "Инициализация ИИ..." if is_russian_request() else "Initializing AI..."
+                friendly_msg = "Инициализация ИИ..." if is_ru else "Initializing AI..."
             elif "Transcribing" in raw_msg:
-                friendly_msg = "Распознавание текста..." if is_russian_request() else "Transcribing text..."
+                friendly_msg = "Распознавание текста..." if is_ru else "Transcribing text..."
             elif "Transcription complete" in raw_msg:
-                friendly_msg = "Завершено ✨" if is_russian_request() else "Complete ✨"
+                friendly_msg = "Завершено ✨" if is_ru else "Complete ✨"
 
             tasks[task_id]['current_status'] = friendly_msg
             print(f"[{task_id}] Status: {raw_msg} -> {friendly_msg}")
@@ -190,6 +191,7 @@ def start_download():
         "details": {}, 
         "logs": [], 
         "server_only": server_only,
+        "is_russian": 'ru' in request.headers.get('Accept-Language', '').lower(),
         "structured": structured,
         "model_size": model_size,
         "download_type": download_type
