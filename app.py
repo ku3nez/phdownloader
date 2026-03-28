@@ -23,6 +23,10 @@ DEFAULT_VIDEO_QUALITY = os.getenv('DEFAULT_VIDEO_QUALITY', '720')
 APP_PORT = int(os.getenv('PORT', 5008))
 CLEANUP_INTERVAL_SECONDS = 60  # 1 minute
 
+def is_russian_request():
+    lang = request.headers.get('Accept-Language', '')
+    return 'ru' in lang.lower()
+
 def cleanup_downloads():
     """Background task to delete old files and folders from the downloads folder."""
     while True:
@@ -71,10 +75,27 @@ def background_download(task_id, url, quality, download_type='video', structured
             tasks[task_id]['progress'] = info['percentage']
             tasks[task_id]['details'] = info
         elif info['type'] == 'status':
-            tasks[task_id]['logs'].append(info['msg'])
-            tasks[task_id]['logs'] = tasks[task_id]['logs'][-20:]  # Keep last 20 lines
-            tasks[task_id]['current_status'] = info['msg']
-            print(f"[{task_id}] Status: {info['msg']}")
+            raw_msg = info['msg']
+            tasks[task_id]['logs'].append(raw_msg)
+            tasks[task_id]['logs'] = tasks[task_id]['logs'][-20:]
+            
+            # Use English headers for mapping but serve localized if we can
+            # We detect language from the app context or just provide a key
+            # For simplicity, we'll map to friendly Russian/English strings
+            friendly_msg = raw_msg
+            if "[download]" in raw_msg:
+                friendly_msg = "Загрузка медиа..." if is_russian_request() else "Downloading media..."
+            elif "[ffmpeg]" in raw_msg or "[ExtractAudio]" in raw_msg or "audio file" in raw_msg:
+                friendly_msg = "Подготовка аудио..." if is_russian_request() else "Preparing audio..."
+            elif "Whisper" in raw_msg:
+                friendly_msg = "Инициализация ИИ..." if is_russian_request() else "Initializing AI..."
+            elif "Transcribing" in raw_msg:
+                friendly_msg = "Распознавание текста..." if is_russian_request() else "Transcribing text..."
+            elif "Transcription complete" in raw_msg:
+                friendly_msg = "Завершено ✨" if is_russian_request() else "Complete ✨"
+
+            tasks[task_id]['current_status'] = friendly_msg
+            print(f"[{task_id}] Status: {raw_msg} -> {friendly_msg}")
 
     def update_metadata(info):
         if 'duration' in info:

@@ -271,6 +271,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                     filename = base + '.mp3'
                 
                 transcript_path = base + "_transcript.txt"
+                if progress_callback:
+                    progress_callback({'type': 'status', 'msg': 'Preparing audio file...'})
+                
                 duration = info.get('duration', 0)
                 transcribe_with_whisper(filename, transcript_path, structured=structured, model_size=model_size, total_duration=duration, check_cancel=check_cancel)
                 
