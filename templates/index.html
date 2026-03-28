@@ -383,29 +383,48 @@
             }
         });
 
-        window.onload = async () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            updateStructuredOptionVisibility();
+            
+            // Reconnection logic
             const savedTaskId = localStorage.getItem('active_task_id');
             if (savedTaskId) {
+                console.log("Found saved task ID:", savedTaskId);
+                const statusArea = document.getElementById('status-area');
+                const message = document.getElementById('message');
+                const btn = document.getElementById('downloadBtn');
+                
+                statusArea.style.display = 'block';
+                message.textContent = isRussian ? 'Восстановление сессии...' : 'Restoring session...';
+                if (btn) btn.disabled = true;
+
                 try {
                     const response = await fetch(`/progress/${savedTaskId}`);
                     if (response.ok) {
                         const data = await response.json();
+                        console.log("Restored task data:", data);
                         if (data.status === 'processing' || data.status === 'completed') {
-                            document.getElementById('status-area').style.display = 'block';
-                            document.getElementById('downloadBtn').disabled = true;
                             document.getElementById('cancelBtn').style.display = 'block';
                             pollProgress(savedTaskId);
                         } else {
+                            console.log("Task finished or invalid, clearing storage");
+                            statusArea.style.display = 'none';
+                            if (btn) btn.disabled = false;
                             localStorage.removeItem('active_task_id');
                         }
                     } else {
+                        console.warn("Task not found on server, clearing storage");
+                        statusArea.style.display = 'none';
+                        if (btn) btn.disabled = false;
                         localStorage.removeItem('active_task_id');
                     }
                 } catch (e) {
                     console.error("Failed to restore task:", e);
+                    statusArea.style.display = 'none';
+                    if (btn) btn.disabled = false;
                 }
             }
-        };
+        });
 
         async function startDownload() {
             const url = document.getElementById('urlInput').value;
