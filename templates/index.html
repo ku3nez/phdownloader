@@ -478,9 +478,9 @@
                         
                         if (data.eta_minutes && data.download_type === 'transcript') {
                             const etaText = isRussian ? `(Осталось примерно: ${data.eta_minutes} мин.)` : `(Est. time: ${data.eta_minutes} min.)`;
-                            if (!message.textContent.includes(etaText)) {
-                                message.textContent += " " + etaText;
-                            }
+                            // Clean up previous ETA if it exists
+                            const baseMsg = message.textContent.split(' (')[0];
+                            message.textContent = `${baseMsg} ${etaText}`;
                         }
                     } else if (data.status === 'completed') {
                         clearInterval(interval);

@@ -80,12 +80,7 @@ def background_download(task_id, url, quality, download_type='video', structured
         if 'duration' in info:
             duration = info['duration']
             tasks[task_id]['total_duration'] = duration
-            
-            # Initial ETA calculation (matching busy logic)
-            factor = 0.6 if model_size == 'small' else 0.25
-            eta_min = max(1, int(duration * factor / 60))
-            tasks[task_id]['eta_minutes'] = eta_min
-            print(f"[{task_id}] Total duration: {duration}s, Initial ETA: {eta_min}min")
+            print(f"[{task_id}] Total duration: {duration}s")
 
     try:
         # Create a task-specific subdirectory to avoid filename collisions
@@ -147,16 +142,10 @@ def start_download():
         # Check for other active transcriptions
         active_trans = [tid for tid, t in tasks.items() if t.get('status') == 'processing' and t.get('download_type') == 'transcript']
         if active_trans:
-            other_task = tasks[active_trans[0]]
+            other_tid = active_trans[0]
+            eta_min = calculate_eta(other_tid)
             
-            # Simple ETA calculation
-            progress = other_task.get('progress', 0)
-            total_duration = other_task.get('total_duration', 0)
-            
-            if total_duration > 0:
-                remaining_video_sec = total_duration * (1 - progress/100)
-                factor = 0.6 if other_task.get('model_size') == 'small' else 0.25
-                eta_min = max(1, int(remaining_video_sec * factor / 60))
+            if eta_min:
                 msg_ru = f"Сервер занят другой транскрипцией. Пожалуйста, подождите примерно {eta_min} мин."
                 msg_en = f"Server is busy with another transcription. Please wait approximately {eta_min} min."
             else:
@@ -184,12 +173,37 @@ def start_download():
     
     return jsonify({"task_id": task_id})
 
+def calculate_eta(task_id):
+    task = tasks.get(task_id)
+    if not task or task.get('status') != 'processing':
+        return None
+    
+    total_duration = task.get('total_duration', 0)
+    if total_duration == 0:
+        return None
+        
+    progress = task.get('progress', 0)
+    # We only care about remaining time for transcription
+    if task.get('download_type') != 'transcript':
+        return None
+        
+    remaining_video_sec = total_duration * (1 - progress/100)
+    factor = 0.6 if task.get('model_size') == 'small' else 0.25
+    return max(1, int(remaining_video_sec * factor / 60))
+
 @app.route('/progress/<task_id>')
 def get_progress(task_id):
     task = tasks.get(task_id)
     if not task:
         return jsonify({"error": "Task not found"}), 404
-    return jsonify(task)
+        
+    # Inject real-time ETA
+    data = task.copy()
+    eta = calculate_eta(task_id)
+    if eta is not None:
+        data['eta_minutes'] = eta
+        
+    return jsonify(data)
 
 @app.route('/get_file/<task_id>')
 def get_file(task_id):
