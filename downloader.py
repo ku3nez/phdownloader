@@ -165,9 +165,18 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             if check_cancel and check_cancel():
                 raise Exception("Download cancelled by user")
 
+    cookie_file = os.getenv('YT_DLP_COOKIE_FILE', 'cookies.txt')
     cookies_browser = os.getenv('YT_DLP_COOKIES_BROWSER')
-    js_runtime = os.getenv('YT_DLP_JS_RUNTIME')
-    cookie_file = os.getenv('YT_DLP_COOKIE_FILE')
+    js_runtime = os.getenv('YT_DLP_JS_RUNTIME', 'node')
+
+    # If no manual cookie file exists, and no browser set, try to find a browser
+    active_cookie_file = cookie_file if cookie_file and os.path.exists(cookie_file) else None
+    active_cookies_browser = cookies_browser
+    
+    if not active_cookie_file and not active_cookies_browser:
+        # Fallback to local browser if running on a desktop
+        active_cookies_browser = 'chrome' # Most common default
+
     ydl_opts = {
         'noplaylist': True,
         'quiet': False,
@@ -185,7 +194,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'extractor_args': {
             'youtube': {
                 'player_client': ['android', 'ios', 'web'],
-                'skip': ['po_token']  # Skip PO token if we have cookies, sometimes helps
+                'skip': ['po_token'] if active_cookie_file or active_cookies_browser else []
             }
         },
         'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else 'chrome',
@@ -195,8 +204,8 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             'Referer': 'https://www.youtube.com/',
         },
         'progress_hooks': [hook],
-        'cookiesfrombrowser': (cookies_browser,) if cookies_browser and cookies_browser.strip() and not (cookie_file and os.path.exists(cookie_file)) else None,
-        'cookiefile': cookie_file if cookie_file and os.path.exists(cookie_file) else None,
+        'cookiesfrombrowser': (active_cookies_browser,) if active_cookies_browser and not active_cookie_file else None,
+        'cookiefile': active_cookie_file,
         'js_runtimes': {js_runtime: {}} if js_runtime else None,
         'remote_components': ['ejs:github'],
     }
