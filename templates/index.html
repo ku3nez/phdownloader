@@ -463,7 +463,8 @@
 
                 const data = await response.json();
                 const taskId = data.task_id;
-
+                localStorage.setItem('active_task_id', taskId);
+                document.getElementById('cancelBtn').style.display = 'block';
                 pollProgress(taskId);
             } catch (error) {
                 message.textContent = "Error: " + error.message;

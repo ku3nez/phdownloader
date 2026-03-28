@@ -190,6 +190,10 @@ def calculate_eta(task_id):
     if task.get('download_type') != 'transcript':
         return None
         
+    # Only show ETA if we have some progress but hasn't reached 100%
+    if progress <= 0 or progress >= 100:
+        return None
+        
     remaining_video_sec = total_duration * (1 - progress/100)
     factor = 0.6 if task.get('model_size') == 'small' else 0.25
     return max(1, int(remaining_video_sec * factor / 60))
