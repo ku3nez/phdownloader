@@ -83,7 +83,10 @@ def background_download(task_id, url, quality, download_type='video', structured
             print(f"[{task_id}] Total duration: {duration}s")
 
     def check_cancel():
-        return tasks.get(task_id, {}).get('status') == 'cancelled'
+        cancelled = tasks.get(task_id, {}).get('status') == 'cancelled'
+        if cancelled:
+            print(f"[{task_id}] Cancellation signal received by background task.")
+        return cancelled
 
     try:
         # Create a task-specific subdirectory to avoid filename collisions

@@ -68,8 +68,14 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         
         from faster_whisper import WhisperModel
         
+        if check_cancel and check_cancel():
+            raise Exception("Transcription cancelled before Whisper init")
+            
         try:
             model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=2)
+            
+            if check_cancel and check_cancel():
+                raise Exception("Transcription cancelled after Whisper init")
             
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': "Transcribing audio..."})
@@ -106,6 +112,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                         })
                     
                     if check_cancel and check_cancel():
+                        print(f"Stopping transcription loop for user request")
                         raise Exception("Transcription cancelled by user")
             
             if progress_callback:
