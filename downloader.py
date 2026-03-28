@@ -173,10 +173,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     active_cookie_file = cookie_file if cookie_file and os.path.exists(cookie_file) else None
     active_cookies_browser = cookies_browser
     
-    if not active_cookie_file and not active_cookies_browser:
-        # Fallback to local browser if running on a desktop
-        active_cookies_browser = 'chrome' # Most common default
-
+    # We do NOT fallback to chrome automatically since it fails on VPS/Server environments
+    # Only use it if explicitly set via environment variable
+    
     ydl_opts = {
         'noplaylist': True,
         'quiet': False,
@@ -193,7 +192,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'log_t_steps': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios', 'web'],
+                'player_client': ['android', 'ios', 'web', 'mweb', 'tv'],
                 'skip': ['po_token'] if active_cookie_file or active_cookies_browser else []
             }
         },
