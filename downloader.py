@@ -176,6 +176,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     # We do NOT fallback to chrome automatically since it fails on VPS/Server environments
     # Only use it if explicitly set via environment variable
     
+    is_youtube = 'youtube.com' in url.lower() or 'youtu.be' in url.lower()
+    is_ph = 'pornhub.com' in url.lower()
+
     ydl_opts = {
         'noplaylist': True,
         'quiet': False,
@@ -195,12 +198,12 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                 'player_client': ['android', 'ios', 'web', 'mweb', 'tv'],
                 'skip': ['po_token'] if active_cookie_file or active_cookies_browser else []
             }
-        },
+        } if is_youtube else {},
         'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else 'chrome',
         'http_headers': {
             'Accept': '*/*',
             'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Referer': 'https://www.youtube.com/',
+            'Referer': 'https://www.youtube.com/' if is_youtube else ('https://www.pornhub.com/' if is_ph else url),
         },
         'progress_hooks': [hook],
         'cookiesfrombrowser': (active_cookies_browser,) if active_cookies_browser and not active_cookie_file else None,
