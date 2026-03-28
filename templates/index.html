@@ -299,8 +299,10 @@
                 <span id="speedLabel">Speed: ---</span>
                 <span id="sizeLabel">Downloaded: ---</span>
             </div>
-            <p id="currentStatus" style="font-size: 13px; color: #ff9900; margin-bottom: 10px; font-weight: bold;">Ready
-            </p>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <p id="currentStatus" style="font-size: 13px; color: #ff9900; margin: 0; font-weight: bold;">Ready</p>
+                <button id="cancelBtn" onclick="cancelDownload()" style="display: none; background: #cc3333; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Cancel</button>
+            </div>
             <div id="log-container"></div>
             <p id="message">Initializing...</p>
         </div>
@@ -317,6 +319,7 @@
                 label.textContent = 'Скачать только на сервер';
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
                 document.getElementById('downloadBtn').textContent = 'Скачать';
+                document.getElementById('cancelBtn').textContent = 'Отмена';
                 document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
 
                 // New localization for format
@@ -379,6 +382,30 @@
                 }
             }
         });
+
+        window.onload = async () => {
+            const savedTaskId = localStorage.getItem('active_task_id');
+            if (savedTaskId) {
+                try {
+                    const response = await fetch(`/progress/${savedTaskId}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.status === 'processing' || data.status === 'completed') {
+                            document.getElementById('status-area').style.display = 'block';
+                            document.getElementById('downloadBtn').disabled = true;
+                            document.getElementById('cancelBtn').style.display = 'block';
+                            pollProgress(savedTaskId);
+                        } else {
+                            localStorage.removeItem('active_task_id');
+                        }
+                    } else {
+                        localStorage.removeItem('active_task_id');
+                    }
+                } catch (e) {
+                    console.error("Failed to restore task:", e);
+                }
+            }
+        };
 
         async function startDownload() {
             const url = document.getElementById('urlInput').value;
@@ -491,11 +518,17 @@
                             window.location.href = `/get_file/${taskId}`;
                         }
                         btn.disabled = false;
-                    } else if (data.status === 'failed') {
+                        document.getElementById('cancelBtn').style.display = 'none';
+                        if (!data.server_only) {
+                            localStorage.removeItem('active_task_id');
+                        }
+                    } else if (data.status === 'failed' || data.status === 'cancelled') {
                         clearInterval(interval);
-                        progressBar.style.backgroundColor = 'red';
-                        message.textContent = 'Error: ' + data.error;
+                        progressBar.style.backgroundColor = data.status === 'cancelled' ? '#aaa' : 'red';
+                        message.textContent = data.error || (isRussian ? 'Ошибка или отмена' : 'Error or Cancelled');
                         btn.disabled = false;
+                        document.getElementById('cancelBtn').style.display = 'none';
+                        localStorage.removeItem('active_task_id');
                     }
                 } catch (e) {
                     console.error(e);
@@ -528,6 +561,23 @@
 
         // Initialize visibility on load
         document.addEventListener('DOMContentLoaded', updateStructuredOptionVisibility);
+
+        async function cancelDownload() {
+            const taskId = localStorage.getItem('active_task_id');
+            if (!taskId) return;
+            
+            if (confirm(isRussian ? "Отменить загрузку?" : "Cancel download?")) {
+                try {
+                    const response = await fetch(`/cancel/${taskId}`, { method: 'POST' });
+                    const result = await response.json();
+                    if (!result.success) {
+                        alert(result.error || "Failed to cancel");
+                    }
+                } catch (e) {
+                    console.error("Cancel failed:", e);
+                }
+            }
+        }
     </script>
 </body>
 

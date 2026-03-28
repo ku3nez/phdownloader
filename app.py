@@ -82,6 +82,9 @@ def background_download(task_id, url, quality, download_type='video', structured
             tasks[task_id]['total_duration'] = duration
             print(f"[{task_id}] Total duration: {duration}s")
 
+    def check_cancel():
+        return tasks.get(task_id, {}).get('status') == 'cancelled'
+
     try:
         # Create a task-specific subdirectory to avoid filename collisions
         task_dir = os.path.join('downloads', task_id)
@@ -92,7 +95,7 @@ def background_download(task_id, url, quality, download_type='video', structured
         active_marker = os.path.join(task_dir, '.active')
         with open(active_marker, 'w') as f: f.write('active')
 
-        filename = download_media(url, output_path=task_dir, quality=quality, media_type=download_type, structured=structured, model_size=model_size, progress_callback=update_progress, metadata_callback=update_metadata)
+        filename = download_media(url, output_path=task_dir, quality=quality, media_type=download_type, structured=structured, model_size=model_size, progress_callback=update_progress, metadata_callback=update_metadata, check_cancel=check_cancel)
         
         # Remove active marker
         if os.path.exists(active_marker): os.remove(active_marker)
@@ -204,6 +207,14 @@ def get_progress(task_id):
         data['eta_minutes'] = eta
         
     return jsonify(data)
+
+@app.route('/cancel/<task_id>', methods=['POST'])
+def cancel_task(task_id):
+    if task_id in tasks:
+        tasks[task_id]['status'] = 'cancelled'
+        tasks[task_id]['error'] = 'Task cancelled by user'
+        return jsonify({"success": True})
+    return jsonify({"error": "Task not found"}), 404
 
 @app.route('/get_file/<task_id>')
 def get_file(task_id):

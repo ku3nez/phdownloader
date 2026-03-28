@@ -11,7 +11,7 @@ try:
 except ImportError:
     ImpersonateTarget = None
 
-def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None, metadata_callback=None):
+def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None, metadata_callback=None, check_cancel=None):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
@@ -61,7 +61,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         except Exception as e:
             return f"Error cleaning VTT: {e}"
 
-    def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='base', total_duration=0):
+    def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='base', total_duration=0, check_cancel=None):
         """Transcribe audio file using Whisper AI with optional formatting."""
         if progress_callback:
             progress_callback({'type': 'status', 'msg': f"Initializing Whisper AI ({model_size})..."})
@@ -104,6 +104,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                             'percentage': percent,
                             'status_msg': f"Transcribing: {cur_min:02d}:{cur_sec:02d} / {tot_min:02d}:{tot_sec:02d}"
                         })
+                    
+                    if check_cancel and check_cancel():
+                        raise Exception("Transcription cancelled by user")
             
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': "Transcription complete."})
@@ -151,6 +154,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                     'eta': strip_ansi(d.get('_eta_str', 'N/A'))
                 }
                 progress_callback(progress_info)
+            
+            if check_cancel and check_cancel():
+                raise Exception("Download cancelled by user")
 
     cookies_browser = os.getenv('YT_DLP_COOKIES_BROWSER')
     js_runtime = os.getenv('YT_DLP_JS_RUNTIME')
@@ -259,7 +265,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                 
                 transcript_path = base + "_transcript.txt"
                 duration = info.get('duration', 0)
-                transcribe_with_whisper(filename, transcript_path, structured=structured, model_size=model_size, total_duration=duration)
+                transcribe_with_whisper(filename, transcript_path, structured=structured, model_size=model_size, total_duration=duration, check_cancel=check_cancel)
                 
                 # Cleanup audio file after transcription
                 try: os.remove(filename)
