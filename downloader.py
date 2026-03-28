@@ -182,11 +182,17 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'nocheckcertificate': True,
         'ignoreerrors': False,
         'log_t_steps': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'web'],
+                'skip': ['po_token']  # Skip PO token if we have cookies, sometimes helps
+            }
+        },
         'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else 'chrome',
         'http_headers': {
             'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://www.pornhub.com/',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://www.youtube.com/',
         },
         'progress_hooks': [hook],
         'cookiesfrombrowser': (cookies_browser,) if cookies_browser and cookies_browser.strip() and not (cookie_file and os.path.exists(cookie_file)) else None,
