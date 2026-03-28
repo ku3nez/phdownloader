@@ -11,7 +11,7 @@ try:
 except ImportError:
     ImpersonateTarget = None
 
-def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None):
+def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None, metadata_callback=None):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
@@ -225,6 +225,8 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
+            if metadata_callback:
+                metadata_callback(info)
             filename = ydl.prepare_filename(info)
             
             filename = ydl.prepare_filename(info)
