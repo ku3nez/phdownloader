@@ -423,7 +423,16 @@
                     })
                 });
 
-                if (!response.ok) throw new Error("Failed to start download");
+                if (!response.ok) {
+                    const data = await response.json();
+                    if (response.status === 429 && data.busy) {
+                        message.textContent = data.error;
+                        message.style.color = "#ff9900";
+                        btn.disabled = false;
+                        return;
+                    }
+                    throw new Error(data.error || "Failed to start download");
+                }
 
                 const data = await response.json();
                 const taskId = data.task_id;
@@ -465,6 +474,13 @@
                         if (data.details) {
                             speedLabel.textContent = `Speed: ${data.details.speed}`;
                             sizeLabel.textContent = `Downloaded: ${data.details.downloaded} / ${data.details.total}`;
+                        }
+                        
+                        if (data.eta_minutes && data.download_type === 'transcript') {
+                            const etaText = isRussian ? `(Осталось примерно: ${data.eta_minutes} мин.)` : `(Est. time: ${data.eta_minutes} min.)`;
+                            if (!message.textContent.includes(etaText)) {
+                                message.textContent += " " + etaText;
+                            }
                         }
                     } else if (data.status === 'completed') {
                         clearInterval(interval);

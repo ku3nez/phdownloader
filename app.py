@@ -70,13 +70,22 @@ def background_download(task_id, url, quality, download_type='video', structured
         if info['type'] == 'progress':
             tasks[task_id]['progress'] = info['percentage']
             tasks[task_id]['details'] = info
-            if 'status_msg' in info:
-                tasks[task_id]['current_status'] = info['status_msg']
         elif info['type'] == 'status':
             tasks[task_id]['logs'].append(info['msg'])
             tasks[task_id]['logs'] = tasks[task_id]['logs'][-20:]  # Keep last 20 lines
             tasks[task_id]['current_status'] = info['msg']
             print(f"[{task_id}] Status: {info['msg']}")
+
+    def update_metadata(info):
+        if 'duration' in info:
+            duration = info['duration']
+            tasks[task_id]['total_duration'] = duration
+            
+            # Initial ETA calculation (matching busy logic)
+            factor = 0.6 if model_size == 'small' else 0.25
+            eta_min = max(1, int(duration * factor / 60))
+            tasks[task_id]['eta_minutes'] = eta_min
+            print(f"[{task_id}] Total duration: {duration}s, Initial ETA: {eta_min}min")
 
     try:
         # Create a task-specific subdirectory to avoid filename collisions
@@ -88,7 +97,7 @@ def background_download(task_id, url, quality, download_type='video', structured
         active_marker = os.path.join(task_dir, '.active')
         with open(active_marker, 'w') as f: f.write('active')
 
-        filename = download_media(url, output_path=task_dir, quality=quality, media_type=download_type, structured=structured, model_size=model_size, progress_callback=update_progress)
+        filename = download_media(url, output_path=task_dir, quality=quality, media_type=download_type, structured=structured, model_size=model_size, progress_callback=update_progress, metadata_callback=update_metadata)
         
         # Remove active marker
         if os.path.exists(active_marker): os.remove(active_marker)
@@ -133,6 +142,28 @@ def start_download():
     structured = request.json.get('structured', True)
     model_size = request.json.get('model_size', 'base')
     server_only = request.json.get('server_only', False)
+
+    if download_type == 'transcript':
+        # Check for other active transcriptions
+        active_trans = [tid for tid, t in tasks.items() if t.get('status') == 'processing' and t.get('download_type') == 'transcript']
+        if active_trans:
+            other_task = tasks[active_trans[0]]
+            
+            # Simple ETA calculation
+            progress = other_task.get('progress', 0)
+            total_duration = other_task.get('total_duration', 0)
+            
+            if total_duration > 0:
+                remaining_video_sec = total_duration * (1 - progress/100)
+                factor = 0.6 if other_task.get('model_size') == 'small' else 0.25
+                eta_min = max(1, int(remaining_video_sec * factor / 60))
+                msg_ru = f"Сервер занят другой транскрипцией. Пожалуйста, подождите примерно {eta_min} мин."
+                msg_en = f"Server is busy with another transcription. Please wait approximately {eta_min} min."
+            else:
+                msg_ru = "Сервер занят другой транскрипцией. Пожалуйста, попробуйте через пару минут."
+                msg_en = "Server is busy with another transcription. Please try again in a few minutes."
+            
+            return jsonify({"error": msg_ru if request.headers.get('Accept-Language', '').startswith('ru') else msg_en, "busy": True}), 429
     
     task_id = str(uuid.uuid4())
     tasks[task_id] = {
@@ -142,7 +173,6 @@ def start_download():
         "error": None, 
         "details": {}, 
         "logs": [], 
-        "current_status": "Starting...",
         "server_only": server_only,
         "structured": structured,
         "model_size": model_size,
