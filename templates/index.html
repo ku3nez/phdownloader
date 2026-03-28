@@ -204,7 +204,6 @@
         }
 
         #log-container {
-            margin-top: 15px;
             padding: 10px;
             background-color: #2c2c2c;
             border-radius: 5px;
@@ -303,7 +302,10 @@
                 <p id="currentStatus" style="font-size: 13px; color: #ff9900; margin: 0; font-weight: bold;">Ready</p>
                 <button id="cancelBtn" onclick="cancelDownload()" style="display: none; background: #cc3333; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Cancel</button>
             </div>
-            <div id="log-container"></div>
+            <details style="text-align: left; margin-top: 15px;">
+                <summary id="logSummary" style="font-size: 12px; color: #888; cursor: pointer; user-select: none; margin-bottom: 5px;">Technical logs</summary>
+                <div id="log-container" style="margin-top: 5px;"></div>
+            </details>
             <p id="message">Initializing...</p>
         </div>
     </div>
@@ -349,6 +351,9 @@
                     modelSelect.options[0].textContent = 'Base (Обычная)';
                     modelSelect.options[1].textContent = 'Small (Высокое качество)';
                 }
+
+                const logSummary = document.getElementById('logSummary');
+                if (logSummary) logSummary.textContent = 'Технические логи';
             } else if (isRussian) {
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
                 document.getElementById('downloadBtn').textContent = 'Скачать';
