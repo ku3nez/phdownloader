@@ -213,8 +213,8 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     }
 
     if media_type == 'audio':
-        # Prefer standalone audio, if not available, grab the lowest resolution video to save bandwidth
-        ydl_opts['format'] = 'bestaudio/best[height<=360]/best'
+        # Prefer standard quality audio (up to 192k) to save bandwidth without quality loss
+        ydl_opts['format'] = 'bestaudio[abr<=192]/bestaudio[ext=m4a]/bestaudio/best[height<=360]/best'
         ydl_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -243,8 +243,8 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         ydl_opts['outtmpl'] = os.path.join(output_path, '%(title)s.%(ext)s')
     
     if media_type == 'transcript':
-        # Prepare for whisper transcription - we need the audio
-        ydl_opts['format'] = 'bestaudio/best'
+        # Prepare for whisper transcription - we need the audio; use low quality to save weight
+        ydl_opts['format'] = 'bestaudio[abr<=64]/bestaudio[ext=m4a]/bestaudio/best'
         ydl_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
