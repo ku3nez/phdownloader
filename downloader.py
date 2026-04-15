@@ -213,12 +213,18 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     }
 
     if media_type == 'audio':
-        # Prefer standard quality audio (up to 192k) to save bandwidth without quality loss
-        ydl_opts['format'] = 'bestaudio[abr<=192]/bestaudio[ext=m4a]/bestaudio/best[height<=360]/best'
+        # Handle audio quality selection (bitrate)
+        if quality and quality.isdigit():
+            audio_bitrate = quality
+        else:
+            audio_bitrate = '192' # Default
+            
+        # Prefer quality up to the selected bitrate to save bandwidth
+        ydl_opts['format'] = f'bestaudio[abr<={audio_bitrate}]/bestaudio[ext=m4a]/bestaudio/best[height<=360]/best'
         ydl_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
-            'preferredquality': '192',
+            'preferredquality': audio_bitrate,
         }]
         ydl_opts['outtmpl'] = os.path.join(output_path, '%(title)s_audio.%(ext)s')
     else:

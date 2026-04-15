@@ -243,6 +243,9 @@
                     <option value="360" {% if default_quality=='360' %}selected{% endif %}>360p</option>
                 </select>
             </div>
+            <div id="audio-quality-hint" style="margin-bottom: 20px; display: none; font-size: 12px; color: #888;">
+                Higher bitrate = better sound, larger file.
+            </div>
             <div style="margin-bottom: 20px;">
                 <label style="font-size: 14px; color: #aaa; margin-right: 10px;">Format:</label>
                 <div style="display: inline-flex; gap: 15px; flex-wrap: wrap; justify-content: center;">
@@ -577,6 +580,65 @@
                 aiOptions.style.display = 'block';
             } else {
                 aiOptions.style.display = 'none';
+            }
+
+            // Always update quality options when format changes
+            updateQualityOptions();
+        }
+
+        function updateQualityOptions() {
+            const format = document.querySelector('input[name="format"]:checked').value;
+            const qualitySelect = document.getElementById('qualitySelect');
+            const audioHint = document.getElementById('audio-quality-hint');
+            
+            // Check if we are already in the correct mode to avoid unnecessary re-renders
+            const isAudioMode = qualitySelect.hasAttribute('data-mode-audio');
+            if (format === 'audio' && isAudioMode) return;
+            if (format !== 'audio' && !isAudioMode && qualitySelect.hasAttribute('data-mode-video')) return;
+
+            qualitySelect.innerHTML = '';
+            
+            if (format === 'audio') {
+                qualitySelect.setAttribute('data-mode-audio', 'true');
+                qualitySelect.removeAttribute('data-mode-video');
+                if (audioHint) {
+                    audioHint.style.display = 'block';
+                    audioHint.textContent = isRussian ? 'Высокий битрейт = лучше звук, больше файл.' : 'Higher bitrate = better sound, larger file.';
+                }
+
+                const options = [
+                    { val: '320', lab: isRussian ? '320 kbps (Высокое)' : '320 kbps (High)' },
+                    { val: '256', lab: '256 kbps' },
+                    { val: '192', lab: isRussian ? '192 kbps (Стандарт)' : '192 kbps (Standard)' },
+                    { val: '128', lab: isRussian ? '128 kbps (Мобильное)' : '128 kbps (Mobile)' },
+                    { val: '64', lab: isRussian ? '64 kbps (Для речи)' : '64 kbps (Voice)' }
+                ];
+                options.forEach(opt => {
+                    const el = document.createElement('option');
+                    el.value = opt.val;
+                    el.textContent = opt.lab;
+                    if (opt.val === '192') el.selected = true;
+                    qualitySelect.appendChild(el);
+                });
+            } else {
+                qualitySelect.setAttribute('data-mode-video', 'true');
+                qualitySelect.removeAttribute('data-mode-audio');
+                if (audioHint) audioHint.style.display = 'none';
+
+                const options = [
+                    { val: 'best', lab: isRussian ? 'Лучшее доступное' : 'Best Available' },
+                    { val: '1080', lab: '1080p' },
+                    { val: '720', lab: '720p' },
+                    { val: '480', lab: '480p' },
+                    { val: '360', lab: '360p' }
+                ];
+                options.forEach(opt => {
+                    const el = document.createElement('option');
+                    el.value = opt.val;
+                    el.textContent = opt.lab;
+                    if (opt.val === '720') el.selected = true;
+                    qualitySelect.appendChild(el);
+                });
             }
         }
 
