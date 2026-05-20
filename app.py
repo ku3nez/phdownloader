@@ -325,6 +325,30 @@ def start_download():
         if not orig_filename:
             orig_filename = "uploaded_file"
             
+        # Ensure the filename has a proper extension
+        base_name, ext = os.path.splitext(orig_filename)
+        if not ext:
+            mime_map = {
+                'audio/x-m4a': '.m4a',
+                'audio/m4a': '.m4a',
+                'audio/mp4': '.m4a',
+                'audio/mpeg': '.mp3',
+                'audio/mp3': '.mp3',
+                'audio/wav': '.wav',
+                'audio/x-wav': '.wav',
+                'audio/ogg': '.ogg',
+                'audio/aac': '.aac',
+                'audio/flac': '.flac',
+                'video/mp4': '.mp4',
+                'video/quicktime': '.mov',
+                'video/x-matroska': '.mkv',
+            }
+            if orig_filename.lower() in ['m4a', 'mp3', 'mp4', 'wav', 'ogg', 'aac', 'flac', 'avi', 'mkv', 'mov']:
+                ext = '.' + orig_filename.lower()
+                orig_filename = "uploaded_file" + ext
+            elif file.content_type in mime_map:
+                orig_filename = orig_filename + mime_map[file.content_type]
+
         file_path = os.path.join(task_dir, orig_filename)
         file.save(file_path)
         
