@@ -51,14 +51,33 @@ def get_media_duration(file_path):
 def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='base', total_duration=0, progress_callback=None, check_cancel=None):
     """Transcribe audio file using Whisper AI with optional formatting."""
     if progress_callback:
-        progress_callback({'type': 'status', 'msg': f"Initializing Whisper AI ({model_size})..."})
-    
+        progress_callback({'type': 'status', 'msg': "Preparing audio..."})
+        
     from faster_whisper import WhisperModel
+    from faster_whisper.audio import decode_audio
+    import numpy as np
     
+    try:
+        # Load and decode audio to 16000Hz mono float32
+        audio_samples = decode_audio(audio_path, sampling_rate=16000)
+        
+        # Check peak amplitude and auto-amplify if too quiet
+        peak = np.max(np.abs(audio_samples)) if len(audio_samples) > 0 else 0.0
+        if 0.0 < peak < 0.15:
+            scale = 0.8 / peak
+            audio_samples = audio_samples * scale
+            print(f"Auto-amplified quiet audio in-memory by factor of {scale:.2f} (+{20 * np.log10(scale):.1f} dB)")
+    except Exception as e:
+        print(f"Error preparing audio, falling back to original file path: {e}")
+        audio_samples = audio_path
+
     if check_cancel and check_cancel():
         raise Exception("Transcription cancelled before Whisper init")
         
     try:
+        if progress_callback:
+            progress_callback({'type': 'status', 'msg': f"Initializing Whisper AI ({model_size})..."})
+            
         model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=2)
         
         if check_cancel and check_cancel():
@@ -67,7 +86,7 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcribing audio..."})
             
-        segments, _ = model.transcribe(audio_path, beam_size=5, vad_filter=False)
+        segments, _ = model.transcribe(audio_samples, beam_size=5, vad_filter=False)
     
         with open(output_path, "w", encoding="utf-8") as f:
             first_segment = True
