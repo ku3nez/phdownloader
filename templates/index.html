@@ -220,6 +220,62 @@
             margin-bottom: 2px;
             line-height: 1.2;
         }
+
+        /* New local file upload and tab styles */
+        .tab-btn {
+            padding: 8px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background-color: rgba(0, 0, 0, 0.2);
+            color: #aaa;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .tab-btn.active {
+            background: linear-gradient(135deg, #ffbc47 0%, #ff9900 100%);
+            color: #000;
+            border-color: transparent;
+            box-shadow: 0 4px 12px rgba(255, 153, 0, 0.3);
+        }
+
+        .file-upload-drag-area {
+            border: 2px dashed rgba(255, 153, 0, 0.3);
+            border-radius: 12px;
+            padding: 25px;
+            background-color: rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 25px;
+        }
+
+        .file-upload-drag-area:hover, .file-upload-drag-area.dragover {
+            border-color: #ff9900;
+            background-color: rgba(255, 153, 0, 0.05);
+            box-shadow: 0 0 15px rgba(255, 153, 0, 0.1);
+        }
+
+        .upload-icon {
+            font-size: 32px;
+        }
+
+        .file-upload-drag-area p {
+            margin: 0;
+            font-size: 14px;
+            color: #ddd;
+        }
+
+        .file-info-label {
+            font-size: 12px;
+            color: #888;
+        }
     </style>
 </head>
 
@@ -230,8 +286,26 @@
             <span class="ph-part">Down<span class="ph-accent">loader</span></span>
         </h1>
         <div>
-            <input type="text" id="urlInput" placeholder="Paste URL here..." required>
-            <br>
+            <!-- Source selection tabs for AI Transcript -->
+            <div id="input-tabs" style="display: none; justify-content: center; gap: 10px; margin-bottom: 15px;">
+                <button id="tab-url" type="button" class="tab-btn active" onclick="setInputSource('url')">URL</button>
+                <button id="tab-file" type="button" class="tab-btn" onclick="setInputSource('file')">Local File</button>
+            </div>
+
+            <!-- URL Input Container -->
+            <div id="url-input-container">
+                <input type="text" id="urlInput" placeholder="Paste URL here..." required>
+            </div>
+
+            <!-- Local File Input Container -->
+            <div id="file-input-container" style="display: none;">
+                <div class="file-upload-drag-area" id="dragArea" onclick="document.getElementById('fileInput').click()">
+                    <span class="upload-icon">📁</span>
+                    <p id="dragAreaText">Drag & drop your audio/video file here or click to browse</p>
+                    <span class="file-info-label" id="fileInfoLabel">Supports m4a, mp3, mp4, wav, etc.</span>
+                    <input type="file" id="fileInput" accept="audio/*,video/*" style="display: none;" onchange="handleFileSelect(this)">
+                </div>
+            </div>
             <div style="margin-bottom: 20px;">
                 <label for="qualitySelect" style="font-size: 14px; color: #aaa; margin-right: 10px;">Quality:</label>
                 <select id="qualitySelect"
@@ -314,16 +388,75 @@
     </div>
 
     <script>
+        // State
+        let inputSource = 'url'; // 'url' or 'file'
+
         // Localization logic
         const lang = navigator.language || navigator.userLanguage;
         const isRussian = lang.startsWith('ru');
+
+        function setInputSource(source) {
+            inputSource = source;
+            const tabUrl = document.getElementById('tab-url');
+            const tabFile = document.getElementById('tab-file');
+            const urlContainer = document.getElementById('url-input-container');
+            const fileContainer = document.getElementById('file-input-container');
+            
+            if (source === 'file') {
+                tabUrl.classList.remove('active');
+                tabFile.classList.add('active');
+                urlContainer.style.display = 'none';
+                fileContainer.style.display = 'block';
+            } else {
+                tabUrl.classList.add('active');
+                tabFile.classList.remove('active');
+                urlContainer.style.display = 'block';
+                fileContainer.style.display = 'none';
+            }
+            
+            updateButtonText();
+        }
+
+        function handleFileSelect(input) {
+            const file = input.files[0];
+            const dragAreaText = document.getElementById('dragAreaText');
+            if (file) {
+                dragAreaText.textContent = file.name;
+                dragAreaText.style.color = '#ff9900';
+            } else {
+                dragAreaText.textContent = isRussian 
+                    ? 'Перетащите аудио/видео файл сюда или нажмите для выбора' 
+                    : 'Drag & drop your audio/video file here or click to browse';
+                dragAreaText.style.color = '#ddd';
+            }
+        }
+
+        function updateButtonText() {
+            const formatRadio = document.querySelector('input[name="format"]:checked');
+            if (!formatRadio) return;
+            const format = formatRadio.value;
+            const btn = document.getElementById('downloadBtn');
+            
+            if (format === 'transcript') {
+                if (inputSource === 'file') {
+                    btn.textContent = isRussian ? 'Распознать файл' : 'Transcribe File';
+                } else {
+                    btn.textContent = isRussian ? 'Распознать по ссылке' : 'Transcribe Link';
+                }
+            } else if (format === 'subtitles') {
+                btn.textContent = isRussian ? 'Получить субтитры' : 'Get Subtitles';
+            } else if (format === 'audio') {
+                btn.textContent = isRussian ? 'Скачать аудио' : 'Download Audio';
+            } else {
+                btn.textContent = isRussian ? 'Скачать видео' : 'Download Video';
+            }
+        }
 
         document.addEventListener('DOMContentLoaded', () => {
             const label = document.getElementById('serverOnlyLabel');
             if (label && isRussian) {
                 label.textContent = 'Скачать только на сервер';
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
-                document.getElementById('downloadBtn').textContent = 'Скачать';
                 document.getElementById('cancelBtn').textContent = 'Отмена';
                 document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
 
@@ -359,7 +492,6 @@
                 if (logSummary) logSummary.textContent = 'Технические логи';
             } else if (isRussian) {
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
-                document.getElementById('downloadBtn').textContent = 'Скачать';
                 document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
 
                 const formatLabel = Array.from(document.querySelectorAll('label')).find(el => el.textContent.includes('Format:'));
@@ -389,6 +521,45 @@
                     modelSelect2.options[1].textContent = 'Small (Высокое качество)';
                 }
             }
+
+            if (isRussian) {
+                document.getElementById('tab-url').textContent = 'Ссылка';
+                document.getElementById('tab-file').textContent = 'Локальный файл';
+                document.getElementById('dragAreaText').textContent = 'Перетащите аудио/видео файл сюда или нажмите для выбора';
+                document.getElementById('fileInfoLabel').textContent = 'Поддерживаются m4a, mp3, mp4, wav и др.';
+            }
+
+            // Drag and drop event listeners
+            const dragArea = document.getElementById('dragArea');
+            if (dragArea) {
+                ['dragenter', 'dragover'].forEach(eventName => {
+                    dragArea.addEventListener(eventName, (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        dragArea.classList.add('dragover');
+                    }, false);
+                });
+
+                ['dragleave', 'drop'].forEach(eventName => {
+                    dragArea.addEventListener(eventName, (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        dragArea.classList.remove('dragover');
+                    }, false);
+                });
+
+                dragArea.addEventListener('drop', (e) => {
+                    const dt = e.dataTransfer;
+                    const files = dt.files;
+                    if (files && files.length > 0) {
+                        const fileInput = document.getElementById('fileInput');
+                        fileInput.files = files;
+                        handleFileSelect(fileInput);
+                    }
+                }, false);
+            }
+
+            updateButtonText();
         });
 
         document.addEventListener('DOMContentLoaded', async () => {
@@ -419,83 +590,160 @@
                             statusArea.style.display = 'none';
                             if (btn) btn.disabled = false;
                             localStorage.removeItem('active_task_id');
+                            updateButtonText();
                         }
                     } else {
                         console.warn("Task not found on server, clearing storage");
                         statusArea.style.display = 'none';
                         if (btn) btn.disabled = false;
                         localStorage.removeItem('active_task_id');
+                        updateButtonText();
                     }
                 } catch (e) {
                     console.error("Failed to restore task:", e);
                     statusArea.style.display = 'none';
                     if (btn) btn.disabled = false;
+                    updateButtonText();
                 }
             }
         });
 
-        async function startDownload() {
-            const url = document.getElementById('urlInput').value;
-            if (!url) {
-                alert("Please enter a URL");
-                return;
-            }
+        function uploadAndStartTask(formData) {
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/start', true);
+                
+                // Listen to upload progress
+                xhr.upload.onprogress = function(e) {
+                    if (e.lengthComputable) {
+                        const percent = (e.loaded / e.total) * 100;
+                        const progressBar = document.getElementById('progressBar');
+                        const message = document.getElementById('message');
+                        progressBar.style.width = percent + '%';
+                        message.textContent = isRussian 
+                            ? `Загрузка файла на сервер... ${Math.round(percent)}%` 
+                            : `Uploading file to server... ${Math.round(percent)}%`;
+                    }
+                };
+                
+                xhr.onload = function() {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try {
+                            const data = JSON.parse(xhr.responseText);
+                            resolve(data);
+                        } catch(err) {
+                            reject(new Error("Invalid response from server"));
+                        }
+                    } else {
+                        try {
+                            const data = JSON.parse(xhr.responseText);
+                            reject(new Error(data.error || "Upload failed"));
+                        } catch(err) {
+                            reject(new Error(`Server error: ${xhr.status}`));
+                        }
+                    }
+                };
+                
+                xhr.onerror = function() {
+                    reject(new Error("Network error"));
+                };
+                
+                xhr.send(formData);
+            });
+        }
 
+        async function startDownload() {
+            const format = document.querySelector('input[name="format"]:checked').value;
             const btn = document.getElementById('downloadBtn');
             const statusArea = document.getElementById('status-area');
             const progressBar = document.getElementById('progressBar');
             const message = document.getElementById('message');
             const speedLabel = document.getElementById('speedLabel');
             const sizeLabel = document.getElementById('sizeLabel');
+            const logContainer = document.getElementById('log-container');
+
+            // Validation
+            if (inputSource === 'file' && format === 'transcript') {
+                const fileInput = document.getElementById('fileInput');
+                if (fileInput.files.length === 0) {
+                    alert(isRussian ? "Пожалуйста, выберите файл" : "Please select a file");
+                    return;
+                }
+            } else {
+                const url = document.getElementById('urlInput').value;
+                if (!url) {
+                    alert(isRussian ? "Пожалуйста, введите ссылку" : "Please enter a URL");
+                    return;
+                }
+            }
 
             btn.disabled = true;
             statusArea.style.display = 'block';
             progressBar.style.width = '0%';
             progressBar.style.backgroundColor = '#ff9900';
-            message.textContent = 'Starting download...';
+            message.textContent = isRussian ? 'Инициализация...' : 'Initializing...';
             speedLabel.textContent = 'Speed: ---';
             sizeLabel.textContent = 'Downloaded: ---';
-            const logContainer = document.getElementById('log-container');
-            logContainer.innerHTML = '<div>Waiting for server...</div>';
+            logContainer.innerHTML = `<div>${isRussian ? 'Ожидание ответа сервера...' : 'Waiting for server...'}</div>`;
 
             try {
                 const quality = document.getElementById('qualitySelect').value;
-                const downloadType = document.querySelector('input[name="format"]:checked').value;
-                const format = document.querySelector('input[name="format"]:checked').value;
                 const serverOnlyCheckbox = document.getElementById('serverOnlyCheckbox');
                 const saveOnServer = serverOnlyCheckbox ? serverOnlyCheckbox.checked : false;
-                const response = await fetch('/start', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        url: url,
-                        quality: quality,
-                        download_type: format,
-                        structured: document.getElementById('structuredToggle').checked,
-                        model_size: document.getElementById('modelSelect').value,
-                        server_only: saveOnServer
-                    })
-                });
+                const structured = document.getElementById('structuredToggle').checked;
+                const modelSize = document.getElementById('modelSelect').value;
 
-                if (!response.ok) {
-                    const data = await response.json();
-                    if (response.status === 429 && data.busy) {
-                        message.textContent = data.error;
-                        message.style.color = "#ff9900";
-                        btn.disabled = false;
-                        return;
+                let taskId;
+
+                if (inputSource === 'file' && format === 'transcript') {
+                    const fileInput = document.getElementById('fileInput');
+                    const formData = new FormData();
+                    formData.append('file', fileInput.files[0]);
+                    formData.append('download_type', format);
+                    formData.append('structured', structured);
+                    formData.append('model_size', modelSize);
+                    formData.append('server_only', saveOnServer);
+
+                    const data = await uploadAndStartTask(formData);
+                    taskId = data.task_id;
+                } else {
+                    const url = document.getElementById('urlInput').value;
+                    const response = await fetch('/start', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            url: url,
+                            quality: quality,
+                            download_type: format,
+                            structured: structured,
+                            model_size: modelSize,
+                            server_only: saveOnServer
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const data = await response.json();
+                        if (response.status === 429 && data.busy) {
+                            message.textContent = data.error;
+                            message.style.color = "#ff9900";
+                            btn.disabled = false;
+                            updateButtonText();
+                            return;
+                        }
+                        throw new Error(data.error || "Failed to start download");
                     }
-                    throw new Error(data.error || "Failed to start download");
+
+                    const data = await response.json();
+                    taskId = data.task_id;
                 }
 
-                const data = await response.json();
-                const taskId = data.task_id;
                 localStorage.setItem('active_task_id', taskId);
                 document.getElementById('cancelBtn').style.display = 'block';
                 pollProgress(taskId);
             } catch (error) {
-                message.textContent = "Error: " + error.message;
+                message.textContent = (isRussian ? "Ошибка: " : "Error: ") + error.message;
                 btn.disabled = false;
+                updateButtonText();
             }
         }
 
@@ -524,11 +772,24 @@
 
                     if (data.status === 'processing') {
                         progressBar.style.width = data.progress + '%';
-                        message.textContent = `Downloading... ${Math.round(data.progress)}%`;
+                        if (data.download_type === 'transcript') {
+                            message.textContent = isRussian 
+                                ? `Распознавание текста... ${Math.round(data.progress)}%` 
+                                : `Transcribing text... ${Math.round(data.progress)}%`;
+                        } else {
+                            message.textContent = isRussian 
+                                ? `Загрузка... ${Math.round(data.progress)}%` 
+                                : `Downloading... ${Math.round(data.progress)}%`;
+                        }
 
-                        if (data.details) {
+                        if (data.details && Object.keys(data.details).length > 0) {
                             speedLabel.textContent = `Speed: ${data.details.speed}`;
                             sizeLabel.textContent = `Downloaded: ${data.details.downloaded} / ${data.details.total}`;
+                            speedLabel.style.display = 'inline';
+                            sizeLabel.style.display = 'inline';
+                        } else {
+                            speedLabel.style.display = 'none';
+                            sizeLabel.style.display = 'none';
                         }
                         
                         if (data.eta_minutes && data.download_type === 'transcript') {
@@ -550,6 +811,7 @@
                         if (!data.server_only) {
                             localStorage.removeItem('active_task_id');
                         }
+                        updateButtonText();
                     } else if (data.status === 'failed' || data.status === 'cancelled') {
                         clearInterval(interval);
                         progressBar.style.backgroundColor = data.status === 'cancelled' ? '#aaa' : 'red';
@@ -557,6 +819,7 @@
                         btn.disabled = false;
                         document.getElementById('cancelBtn').style.display = 'none';
                         localStorage.removeItem('active_task_id');
+                        updateButtonText();
                     }
                 } catch (e) {
                     console.error(e);
@@ -569,6 +832,7 @@
             const radio = document.querySelector('input[name="format"]:checked');
             const structuredOption = document.getElementById('structured-option');
             const aiOptions = document.getElementById('ai-options');
+            const inputTabs = document.getElementById('input-tabs');
             
             if (radio && (radio.value === 'subtitles' || radio.value === 'transcript')) {
                 structuredOption.style.display = 'block';
@@ -578,12 +842,16 @@
             
             if (radio && radio.value === 'transcript') {
                 aiOptions.style.display = 'block';
+                inputTabs.style.display = 'flex';
             } else {
                 aiOptions.style.display = 'none';
+                inputTabs.style.display = 'none';
+                setInputSource('url'); // reset to url for non-transcript formats
             }
 
             // Always update quality options when format changes
             updateQualityOptions();
+            updateButtonText();
         }
 
         function updateQualityOptions() {

@@ -1,11 +1,24 @@
 from flask import Flask, render_template, request, send_file, jsonify
-from downloader import download_media
+from downloader import download_media, transcribe_with_whisper, get_media_duration
 import os
 import threading
 import uuid
 import time
 import shutil
 from dotenv import load_dotenv
+import builtins
+
+def safe_print(*args, **kwargs):
+    try:
+        builtins.print(*args, **kwargs)
+    except UnicodeEncodeError:
+        safe_args = [
+            str(arg).encode('ascii', errors='replace').decode('ascii')
+            for arg in args
+        ]
+        builtins.print(*safe_args, **kwargs)
+
+print = safe_print
 
 # Load environment variables
 load_dotenv()
@@ -69,6 +82,95 @@ def cleanup_downloads():
 # Start cleanup thread
 cleanup_thread = threading.Thread(target=cleanup_downloads, daemon=True)
 cleanup_thread.start()
+
+def background_transcribe_file(task_id, file_path, structured=True, model_size='base', server_only=False):
+    def update_progress(info):
+        if info['type'] == 'progress':
+            tasks[task_id]['progress'] = info['percentage']
+            tasks[task_id]['details'] = info
+        elif info['type'] == 'status':
+            raw_msg = info['msg']
+            tasks[task_id]['logs'].append(raw_msg)
+            tasks[task_id]['logs'] = tasks[task_id]['logs'][-20:]
+            
+            is_ru = tasks[task_id].get('is_russian', False)
+            friendly_msg = raw_msg
+            if "Whisper" in raw_msg:
+                friendly_msg = "Инициализация ИИ..." if is_ru else "Initializing AI..."
+            elif "Transcribing" in raw_msg:
+                friendly_msg = "Распознавание текста..." if is_ru else "Transcribing text..."
+            elif "Transcription complete" in raw_msg:
+                friendly_msg = "Завершено ✨" if is_ru else "Complete ✨"
+
+            tasks[task_id]['current_status'] = friendly_msg
+            print(f"[{task_id}] Status: {raw_msg} -> {friendly_msg}")
+
+    def check_cancel():
+        cancelled = tasks.get(task_id, {}).get('status') == 'cancelled'
+        if cancelled:
+            print(f"[{task_id}] Cancellation signal received by background task.")
+        return cancelled
+
+    try:
+        task_dir = os.path.dirname(file_path)
+        active_marker = os.path.join(task_dir, '.active')
+        
+        # Determine total duration of the uploaded file for progress tracking
+        duration = get_media_duration(file_path)
+        tasks[task_id]['total_duration'] = duration
+        
+        base, _ = os.path.splitext(file_path)
+        transcript_path = base + "_transcript.txt"
+        
+        transcribe_with_whisper(
+            audio_path=file_path,
+            output_path=transcript_path,
+            structured=structured,
+            model_size=model_size,
+            total_duration=duration,
+            progress_callback=update_progress,
+            check_cancel=check_cancel
+        )
+        
+        # Remove active marker
+        if os.path.exists(active_marker): 
+            os.remove(active_marker)
+            
+        # Clean up the uploaded media file to save server space
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"[{task_id}] Cleaned up uploaded media file: {file_path}")
+        except Exception as e:
+            print(f"[{task_id}] Failed to delete uploaded media file: {e}")
+            
+        if os.path.exists(transcript_path):
+            if server_only:
+                server_filename = os.path.join(os.path.dirname(transcript_path), '[SERVER] ' + os.path.basename(transcript_path))
+                os.rename(transcript_path, server_filename)
+                transcript_path = server_filename
+                print(f"[{task_id}] Renamed for server-only: {transcript_path}")
+                
+            tasks[task_id]['status'] = 'completed'
+            tasks[task_id]['filename'] = transcript_path
+            tasks[task_id]['progress'] = 100
+            tasks[task_id]['server_only'] = server_only
+            print(f"[{task_id}] Upload task completed successfully.")
+        else:
+            tasks[task_id]['status'] = 'failed'
+            tasks[task_id]['error'] = 'Transcription completed but output file not found.'
+    except Exception as e:
+        tasks[task_id]['status'] = 'failed'
+        tasks[task_id]['error'] = str(e)
+        # Cleanup active marker if it exists
+        try:
+            task_dir = os.path.dirname(file_path)
+            active_marker = os.path.join(task_dir, '.active')
+            if os.path.exists(active_marker):
+                os.remove(active_marker)
+        except:
+            pass
+
 
 def background_download(task_id, url, quality, download_type='video', structured=True, model_size='base', server_only=False):
     def update_progress(info):
@@ -156,16 +258,26 @@ def index():
 
 @app.route('/start', methods=['POST'])
 def start_download():
-    url = request.json.get('url')
-    if not url:
-        return jsonify({"error": "URL is required"}), 400
-    
-    quality = request.json.get('quality', DEFAULT_VIDEO_QUALITY)
-    download_type = request.json.get('download_type', 'video')
-    structured = request.json.get('structured', True)
-    model_size = request.json.get('model_size', 'base')
-    server_only = request.json.get('server_only', False)
+    if request.is_json:
+        url = request.json.get('url')
+        file = None
+        quality = request.json.get('quality', DEFAULT_VIDEO_QUALITY)
+        download_type = request.json.get('download_type', 'video')
+        structured = request.json.get('structured', True)
+        model_size = request.json.get('model_size', 'base')
+        server_only = request.json.get('server_only', False)
+    else:
+        url = request.form.get('url')
+        file = request.files.get('file')
+        quality = request.form.get('quality', DEFAULT_VIDEO_QUALITY)
+        download_type = request.form.get('download_type', 'video')
+        structured = request.form.get('structured', 'true').lower() == 'true'
+        model_size = request.form.get('model_size', 'base')
+        server_only = request.form.get('server_only', 'false').lower() == 'true'
 
+    if not url and not file:
+        return jsonify({"error": "URL or File is required"}), 400
+    
     if download_type == 'transcript':
         # Check for other active transcriptions
         active_trans = [tid for tid, t in tasks.items() if t.get('status') == 'processing' and t.get('download_type') == 'transcript']
@@ -197,8 +309,30 @@ def start_download():
         "download_type": download_type
     }
     
-    thread = threading.Thread(target=background_download, args=(task_id, url, quality, download_type, structured, model_size, server_only))
-    thread.start()
+    if file:
+        # Create a task-specific subdirectory to avoid filename collisions
+        task_dir = os.path.join('downloads', task_id)
+        if not os.path.exists(task_dir):
+            os.makedirs(task_dir)
+
+        # Create active marker to prevent cleanup while processing
+        active_marker = os.path.join(task_dir, '.active')
+        with open(active_marker, 'w') as f: 
+            f.write('active')
+
+        from werkzeug.utils import secure_filename
+        orig_filename = secure_filename(file.filename)
+        if not orig_filename:
+            orig_filename = "uploaded_file"
+            
+        file_path = os.path.join(task_dir, orig_filename)
+        file.save(file_path)
+        
+        thread = threading.Thread(target=background_transcribe_file, args=(task_id, file_path, structured, model_size, server_only))
+        thread.start()
+    else:
+        thread = threading.Thread(target=background_download, args=(task_id, url, quality, download_type, structured, model_size, server_only))
+        thread.start()
     
     return jsonify({"task_id": task_id})
 
