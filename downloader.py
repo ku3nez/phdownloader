@@ -21,6 +21,7 @@ print = safe_print
 load_dotenv()
 try:
     from yt_dlp.networking.impersonate import ImpersonateTarget
+    import curl_cffi
 except ImportError:
     ImpersonateTarget = None
 
@@ -255,7 +256,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                 'skip': ['po_token'] if active_cookie_file or active_cookies_browser else []
             }
         } if is_youtube else {},
-        'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else 'chrome',
+        'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else None,
         'http_headers': {
             'Accept': '*/*',
             'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
