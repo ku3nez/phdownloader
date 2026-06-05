@@ -226,13 +226,38 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     cookies_browser = os.getenv('YT_DLP_COOKIES_BROWSER')
     js_runtime = os.getenv('YT_DLP_JS_RUNTIME', 'node')
 
-    # If no manual cookie file exists, and no browser set, try to find a browser
     active_cookie_file = cookie_file if cookie_file and os.path.exists(cookie_file) else None
-    active_cookies_browser = cookies_browser
-    
-    # We do NOT fallback to chrome automatically since it fails on VPS/Server environments
-    # Only use it if explicitly set via environment variable
-    
+
+    # Validate that the browser cookie DB actually exists before trying to use it
+    # (fails on VPS/servers where the browser is not installed)
+    active_cookies_browser = None
+    if cookies_browser:
+        import glob
+        browser_paths = {
+            'chrome': [
+                os.path.expanduser('~/.config/google-chrome'),
+                os.path.expanduser('~/.config/chromium'),
+                os.path.expandvars('%LOCALAPPDATA%/Google/Chrome/User Data'),
+            ],
+            'firefox': [
+                os.path.expanduser('~/.mozilla/firefox'),
+                os.path.expandvars('%APPDATA%/Mozilla/Firefox/Profiles'),
+            ],
+            'chromium': [
+                os.path.expanduser('~/.config/chromium'),
+            ],
+        }
+        browser_key = cookies_browser.lower()
+        paths_to_check = browser_paths.get(browser_key, [])
+        browser_available = any(os.path.exists(p) for p in paths_to_check)
+        if browser_available:
+            active_cookies_browser = cookies_browser
+            print(f"Using browser cookies from: {cookies_browser}")
+        else:
+            print(f"WARNING: Browser '{cookies_browser}' not found on this system, skipping browser cookies.")
+            if progress_callback:
+                progress_callback({'type': 'status', 'msg': f"WARNING: Browser '{cookies_browser}' not found, trying without browser cookies..."})
+
     is_youtube = 'youtube.com' in url.lower() or 'youtu.be' in url.lower()
     is_ph = 'pornhub.com' in url.lower()
 
