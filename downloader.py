@@ -225,6 +225,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     cookie_file = os.getenv('YT_DLP_COOKIE_FILE', 'cookies.txt')
     cookies_browser = os.getenv('YT_DLP_COOKIES_BROWSER')
     js_runtime = os.getenv('YT_DLP_JS_RUNTIME', 'node')
+    proxy = os.getenv('YT_DLP_PROXY')  # e.g. socks5://127.0.0.1:1080 or http://host:port
 
     active_cookie_file = cookie_file if cookie_file and os.path.exists(cookie_file) else None
 
@@ -305,6 +306,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'cookiefile': active_cookie_file,
         'js_runtimes': {js_runtime: {}} if js_runtime else None,
         'remote_components': ['ejs:github'],
+        'proxy': proxy if proxy else None,
     }
 
     if media_type == 'audio':
