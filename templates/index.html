@@ -690,8 +690,10 @@
                 const quality = document.getElementById('qualitySelect').value;
                 const serverOnlyCheckbox = document.getElementById('serverOnlyCheckbox');
                 const saveOnServer = serverOnlyCheckbox ? serverOnlyCheckbox.checked : false;
-                const structured = document.getElementById('structuredToggle').checked;
-                const modelSize = document.getElementById('modelSelect').value;
+                const structuredToggle = document.getElementById('structuredToggle');
+                const structured = structuredToggle ? structuredToggle.checked : true;
+                const modelSelect = document.getElementById('modelSelect');
+                const modelSize = modelSelect ? modelSelect.value : 'base';
 
                 let taskId;
 

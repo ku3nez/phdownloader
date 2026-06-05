@@ -243,7 +243,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'concurrent_fragment_downloads': 4,
         'retries': 30,
         'fragment_retries': 30,
-        'retry_sleep_functions': {'http': lambda n: 5 * 2 ** n}, # Exponential backoff for HTTP errors
+        'retry_sleep_functions': {'http': lambda n: 5 * 2 ** n},
         'socket_timeout': 60,
         'nocontinue': False,
         'hls_prefer_native': True,
@@ -255,11 +255,24 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                 'player_client': ['android', 'ios', 'web', 'mweb', 'tv'],
                 'skip': ['po_token'] if active_cookie_file or active_cookies_browser else []
             }
-        } if is_youtube else {},
+        } if is_youtube else (
+            {
+                'pornhub': {
+                    'age_verified': ['1'],
+                }
+            } if is_ph else {}
+        ),
         'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else None,
         'http_headers': {
-            'Accept': '*/*',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
             'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             'Referer': 'https://www.youtube.com/' if is_youtube else ('https://www.pornhub.com/' if is_ph else url),
         },
         'progress_hooks': [hook],
@@ -382,6 +395,21 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         error_msg = f"{str(e)}"
         if not error_msg.strip():
             error_msg = f"Unknown Error: {type(e).__name__}"
+        
+        # Provide helpful hints for common errors
+        if 'HTTP Error 403' in error_msg or 'Forbidden' in error_msg:
+            if is_ph:
+                error_msg = (
+                    "HTTP Error 403: PornHub requires browser cookies for access.\n"
+                    "Set YT_DLP_COOKIES_BROWSER=chrome (or firefox) in your .env file, "
+                    "or export cookies to cookies.txt and set YT_DLP_COOKIE_FILE=cookies.txt"
+                )
+            elif is_youtube:
+                error_msg = (
+                    "HTTP Error 403: YouTube is blocking the request.\n"
+                    "Try setting YT_DLP_COOKIES_BROWSER=chrome in your .env file "
+                    "to use your browser session cookies."
+                )
         
         full_tb = traceback.format_exc()
         print(f"DOWNLOAD EXCEPTION CAUGHT:\n{full_tb}")
