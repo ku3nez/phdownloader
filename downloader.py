@@ -259,10 +259,19 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': f"WARNING: Browser '{cookies_browser}' not found, trying without browser cookies..."})
 
+    import shutil
+    has_aria2 = shutil.which('aria2c') is not None
+    if has_aria2:
+        print("Using external downloader: aria2c (multithreaded)")
+
     is_youtube = 'youtube.com' in url.lower() or 'youtu.be' in url.lower()
     is_ph = 'pornhub.com' in url.lower()
 
     ydl_opts = {
+        'external_downloader': 'aria2c' if has_aria2 else None,
+        'external_downloader_args': {
+            'aria2c': ['-x', '16', '-s', '16', '-k', '1M', '--min-split-size=1M']
+        } if has_aria2 else None,
         'noplaylist': True,
         'quiet': False,
         'logger': YdlLogger(),
