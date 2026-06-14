@@ -355,96 +355,109 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         }]
         ydl_opts['outtmpl'] = os.path.join(output_path, '%(title)s_audio.%(ext)s')
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            if metadata_callback:
-                metadata_callback(info)
-            filename = ydl.prepare_filename(info)
-            
-            filename = ydl.prepare_filename(info)
-            
-            if media_type == 'subtitles':
-                # Check for subtitles
-                subtitle_files = []
-                base_name, _ = os.path.splitext(filename)
-                for f in os.listdir(output_path):
-                    if f.startswith(os.path.basename(base_name)) and f.endswith('.vtt'):
-                        subtitle_files.append(os.path.join(output_path, f))
-                
-                if subtitle_files:
-                    transcript_path = base_name + "_subtitles.txt"
-                    clean_text = clean_vtt(subtitle_files[0], structured=structured)
-                    with open(transcript_path, 'w', encoding='utf-8') as f:
-                        f.write(clean_text)
-                    for f in subtitle_files:
-                        try: os.remove(f)
-                        except: pass
-                    return os.path.abspath(transcript_path)
-                else:
-                    raise Exception("No subtitles found on YouTube for this video.")
-
-            if media_type == 'transcript':
-                # Use Whisper on the downloaded audio
-                base, _ = os.path.splitext(filename)
-                if os.path.exists(base + '.mp3'):
-                    filename = base + '.mp3'
-                
-                transcript_path = base + "_transcript.txt"
+    info = None
+    ydl_instance = None
+    for attempt in range(2):
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                ydl_instance = ydl
+                break
+        except Exception as e:
+            error_str = str(e)
+            if attempt == 0 and ydl_opts.get('impersonate') and ('Impersonate target' in error_str or 'curl_cffi' in error_str):
+                print("WARNING: Impersonation is not available on this system. Retrying without impersonation...")
                 if progress_callback:
-                    progress_callback({'type': 'status', 'msg': 'Preparing audio file...'})
-                
-                duration = info.get('duration', 0)
-                transcribe_with_whisper(filename, transcript_path, structured=structured, model_size=model_size, total_duration=duration, progress_callback=progress_callback, check_cancel=check_cancel)
-                
-                # Cleanup audio file after transcription
-                try: os.remove(filename)
-                except: pass
-                
-                return os.path.abspath(transcript_path)
+                    progress_callback({'type': 'status', 'msg': "WARNING: Impersonation not supported. Retrying..."})
+                ydl_opts['impersonate'] = None
+                continue
+            
+            # General cleanup try for any partial files
+            pass
+            
+            error_msg = f"{error_str}"
+            if not error_msg.strip():
+                error_msg = f"Unknown Error: {type(e).__name__}"
+            
+            # Provide helpful hints for common errors
+            if 'HTTP Error 403' in error_msg or 'Forbidden' in error_msg:
+                if is_ph:
+                    error_msg = (
+                        "HTTP Error 403: PornHub requires browser cookies for access.\n"
+                        "Set YT_DLP_COOKIES_BROWSER=chrome (or firefox) in your .env file, "
+                        "or export cookies to cookies.txt and set YT_DLP_COOKIE_FILE=cookies.txt"
+                    )
+                elif is_youtube:
+                    error_msg = (
+                        "HTTP Error 403: YouTube is blocking the request.\n"
+                        "Try setting YT_DLP_COOKIES_BROWSER=chrome in your .env file "
+                        "to use your browser session cookies."
+                    )
+            
+            full_tb = traceback.format_exc()
+            print(f"DOWNLOAD EXCEPTION CAUGHT:\n{full_tb}")
+            
+            if progress_callback:
+                progress_callback({'type': 'status', 'msg': f"ERROR: {error_msg}"})
+                progress_callback({'type': 'status', 'msg': "Check server console for full traceback."})
+            return None
 
-            if media_type == 'audio':
-                # Extension will be .mp3 after post-processing
-                base, _ = os.path.splitext(filename)
-                if os.path.exists(base + '.mp3'):
-                    filename = base + '.mp3'
+    if info and ydl_instance:
+        if metadata_callback:
+            metadata_callback(info)
+        filename = ydl_instance.prepare_filename(info)
+        
+        if media_type == 'subtitles':
+            # Check for subtitles
+            subtitle_files = []
+            base_name, _ = os.path.splitext(filename)
+            for f in os.listdir(output_path):
+                if f.startswith(os.path.basename(base_name)) and f.endswith('.vtt'):
+                    subtitle_files.append(os.path.join(output_path, f))
+            
+            if subtitle_files:
+                transcript_path = base_name + "_subtitles.txt"
+                clean_text = clean_vtt(subtitle_files[0], structured=structured)
+                with open(transcript_path, 'w', encoding='utf-8') as f:
+                    f.write(clean_text)
+                for f in subtitle_files:
+                    try: os.remove(f)
+                    except: pass
+                return os.path.abspath(transcript_path)
             else:
-                # If it was merged, the extension might have changed to mp4
-                if not os.path.exists(filename):
-                    base, _ = os.path.splitext(filename)
-                    if os.path.exists(base + '.mp4'):
-                        filename = base + '.mp4'
-            return os.path.abspath(filename)
-    except Exception as e:
-        # General cleanup try for any partial files
-        pass
-        
-        error_msg = f"{str(e)}"
-        if not error_msg.strip():
-            error_msg = f"Unknown Error: {type(e).__name__}"
-        
-        # Provide helpful hints for common errors
-        if 'HTTP Error 403' in error_msg or 'Forbidden' in error_msg:
-            if is_ph:
-                error_msg = (
-                    "HTTP Error 403: PornHub requires browser cookies for access.\n"
-                    "Set YT_DLP_COOKIES_BROWSER=chrome (or firefox) in your .env file, "
-                    "or export cookies to cookies.txt and set YT_DLP_COOKIE_FILE=cookies.txt"
-                )
-            elif is_youtube:
-                error_msg = (
-                    "HTTP Error 403: YouTube is blocking the request.\n"
-                    "Try setting YT_DLP_COOKIES_BROWSER=chrome in your .env file "
-                    "to use your browser session cookies."
-                )
-        
-        full_tb = traceback.format_exc()
-        print(f"DOWNLOAD EXCEPTION CAUGHT:\n{full_tb}")
-        
-        if progress_callback:
-            progress_callback({'type': 'status', 'msg': f"ERROR: {error_msg}"})
-            progress_callback({'type': 'status', 'msg': "Check server console for full traceback."})
-        return None
+                raise Exception("No subtitles found on YouTube for this video.")
+
+        if media_type == 'transcript':
+            # Use Whisper on the downloaded audio
+            base, _ = os.path.splitext(filename)
+            if os.path.exists(base + '.mp3'):
+                filename = base + '.mp3'
+            
+            transcript_path = base + "_transcript.txt"
+            if progress_callback:
+                progress_callback({'type': 'status', 'msg': 'Preparing audio file...'})
+            
+            duration = info.get('duration', 0)
+            transcribe_with_whisper(filename, transcript_path, structured=structured, model_size=model_size, total_duration=duration, progress_callback=progress_callback, check_cancel=check_cancel)
+            
+            # Cleanup audio file after transcription
+            try: os.remove(filename)
+            except: pass
+            
+            return os.path.abspath(transcript_path)
+
+        if media_type == 'audio':
+            # Extension will be .mp3 after post-processing
+            base, _ = os.path.splitext(filename)
+            if os.path.exists(base + '.mp3'):
+                filename = base + '.mp3'
+        else:
+            # If it was merged, the extension might have changed to mp4
+            if not os.path.exists(filename):
+                base, _ = os.path.splitext(filename)
+                if os.path.exists(base + '.mp4'):
+                    filename = base + '.mp4'
+        return os.path.abspath(filename)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
