@@ -11,6 +11,8 @@ RestartSec=3
 StandardOutput=append:/var/log/phdownloader.log
 StandardError=append:/var/log/phdownloader.log
 Environment=PYTHONUNBUFFERED=1
+Environment=OMP_NUM_THREADS=1
+Environment=OMP_WAIT_POLICY=PASSIVE
 
 [Install]
 WantedBy=multi-user.target
