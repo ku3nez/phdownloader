@@ -95,7 +95,7 @@ def background_transcribe_file(task_id, file_path, structured=True, model_size='
             
             is_ru = tasks[task_id].get('is_russian', False)
             friendly_msg = raw_msg
-            if "Whisper" in raw_msg:
+            if "Initializing Whisper" in raw_msg or "Whisper AI" in raw_msg:
                 friendly_msg = "Инициализация ИИ..." if is_ru else "Initializing AI..."
             elif "Transcribing" in raw_msg:
                 friendly_msg = "Распознавание текста..." if is_ru else "Transcribing text..."
@@ -190,7 +190,7 @@ def background_download(task_id, url, quality, download_type='video', structured
                 friendly_msg = "Загрузка медиа..." if is_ru else "Downloading media..."
             elif "[ffmpeg]" in raw_msg or "[ExtractAudio]" in raw_msg or "audio file" in raw_msg:
                 friendly_msg = "Подготовка аудио..." if is_ru else "Preparing audio..."
-            elif "Whisper" in raw_msg:
+            elif "Initializing Whisper" in raw_msg or "Whisper AI" in raw_msg:
                 friendly_msg = "Инициализация ИИ..." if is_ru else "Initializing AI..."
             elif "Transcribing" in raw_msg:
                 friendly_msg = "Распознавание текста..." if is_ru else "Transcribing text..."
@@ -379,7 +379,13 @@ def calculate_eta(task_id):
         return None
         
     remaining_video_sec = total_duration * (1 - progress/100)
-    factor = 0.6 if task.get('model_size') == 'small' else 0.25
+    model_size = task.get('model_size', 'base')
+    if model_size == 'small':
+        factor = 0.6
+    elif model_size == 'base':
+        factor = 0.25
+    else: # tiny
+        factor = 0.1
     return max(1, int(remaining_video_sec * factor / 60))
 
 @app.route('/progress/<task_id>')

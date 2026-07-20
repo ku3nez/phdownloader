@@ -57,40 +57,77 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
     from faster_whisper import WhisperModel
     from faster_whisper.audio import decode_audio
     import numpy as np
+    import logging
+    
+    # Configure faster_whisper logger capture to send logs to the client
+    fw_logger = logging.getLogger("faster_whisper")
+    original_level = fw_logger.level
+    fw_logger.setLevel(logging.INFO)
+    
+    class TaskLogHandler(logging.Handler):
+        def __init__(self, callback):
+            super().__init__()
+            self.callback = callback
+        def emit(self, record):
+            try:
+                msg = self.format(record)
+                if self.callback:
+                    self.callback({'type': 'status', 'msg': f"[Whisper] {msg}"})
+            except:
+                pass
+                
+    handler = TaskLogHandler(progress_callback)
+    handler.setFormatter(logging.Formatter('%(message)s'))
+    fw_logger.addHandler(handler)
     
     try:
         # Load and decode audio to 16000Hz mono float32
-        audio_samples = decode_audio(audio_path, sampling_rate=16000)
-        
-        # Check peak amplitude and auto-amplify if too quiet
-        peak = np.max(np.abs(audio_samples)) if len(audio_samples) > 0 else 0.0
-        if 0.0 < peak < 0.15:
-            scale = 0.8 / peak
-            audio_samples = audio_samples * scale
-            print(f"Auto-amplified quiet audio in-memory by factor of {scale:.2f} (+{20 * np.log10(scale):.1f} dB)")
-    except Exception as e:
-        print(f"Error preparing audio, falling back to original file path: {e}")
-        audio_samples = audio_path
-
-    if check_cancel and check_cancel():
-        raise Exception("Transcription cancelled before Whisper init")
-        
-    try:
-        if progress_callback:
-            progress_callback({'type': 'status', 'msg': f"Initializing Whisper AI ({model_size})..."})
+        try:
+            audio_samples = decode_audio(audio_path, sampling_rate=16000)
             
-        model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=2)
+            # Check peak amplitude and auto-amplify if too quiet
+            peak = np.max(np.abs(audio_samples)) if len(audio_samples) > 0 else 0.0
+            if 0.0 < peak < 0.15:
+                scale = 0.8 / peak
+                audio_samples = audio_samples * scale
+                msg = f"Auto-amplified quiet audio in-memory by factor of {scale:.2f} (+{20 * np.log10(scale):.1f} dB)"
+                print(msg)
+                if progress_callback:
+                    progress_callback({'type': 'status', 'msg': msg})
+        except Exception as e:
+            msg = f"Error preparing audio, falling back to original file path: {e}"
+            print(msg)
+            if progress_callback:
+                progress_callback({'type': 'status', 'msg': msg})
+            audio_samples = audio_path
+
+        if check_cancel and check_cancel():
+            raise Exception("Transcription cancelled before Whisper init")
+            
+        # Get thread count from environment
+        threads_env = os.getenv('WHISPER_CPU_THREADS')
+        cpu_threads = int(threads_env) if threads_env and threads_env.isdigit() else 2
+        
+        msg = f"Initializing Whisper Model: size={model_size}, threads={cpu_threads}, compute=int8"
+        print(msg)
+        if progress_callback:
+            progress_callback({'type': 'status', 'msg': msg})
+            
+        model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=cpu_threads)
         
         if check_cancel and check_cancel():
             raise Exception("Transcription cancelled after Whisper init")
         
+        msg = "Transcribing audio (Voice Activity Detection enabled)..."
+        print(msg)
         if progress_callback:
-            progress_callback({'type': 'status', 'msg': "Transcribing audio..."})
+            progress_callback({'type': 'status', 'msg': msg})
             
-        segments, _ = model.transcribe(audio_samples, beam_size=5, vad_filter=False)
+        segments, _ = model.transcribe(audio_samples, beam_size=5, vad_filter=True)
     
         with open(output_path, "w", encoding="utf-8") as f:
             first_segment = True
+            last_logged_percent = -1.0
             for segment in segments:
                 text_part = segment.text.strip()
                 if not text_part:
@@ -109,7 +146,7 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
                 
                 # Send progress update based on audio duration
                 if progress_callback and total_duration > 0:
-                    percent = min(99, (segment.end / total_duration) * 100)
+                    percent = min(99.0, (segment.end / total_duration) * 100.0)
                     cur_min, cur_sec = int(segment.end // 60), int(segment.end % 60)
                     tot_min, tot_sec = int(total_duration // 60), int(total_duration % 60)
                     progress_callback({
@@ -117,6 +154,13 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
                         'percentage': percent,
                         'status_msg': f"Transcribing: {cur_min:02d}:{cur_sec:02d} / {tot_min:02d}:{tot_sec:02d}"
                     })
+                    # Log progress to the text console if it changes by >= 1% or it's the first segment
+                    if percent - last_logged_percent >= 1.0 or last_logged_percent < 0:
+                        progress_callback({
+                            'type': 'status',
+                            'msg': f"Progress: {cur_min:02d}:{cur_sec:02d} / {tot_min:02d}:{tot_sec:02d} ({percent:.1f}%)"
+                        })
+                        last_logged_percent = percent
                 
                 if check_cancel and check_cancel():
                     print(f"Stopping transcription loop for user request")
@@ -128,7 +172,13 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
         if progress_callback:
             progress_callback({'type': 'status', 'msg': f"Transcription error: {str(e)}"})
         raise e
-    
+    finally:
+        try:
+            fw_logger.removeHandler(handler)
+            fw_logger.setLevel(original_level)
+        except:
+            pass
+            
     return output_path
 
 def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None, metadata_callback=None, check_cancel=None):
