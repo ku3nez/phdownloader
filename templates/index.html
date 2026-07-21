@@ -381,7 +381,17 @@
                 <button id="cancelBtn" onclick="cancelDownload()" style="display: none; background: #cc3333; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Cancel</button>
             </div>
             <details style="text-align: left; margin-top: 15px;">
-                <summary id="logSummary" style="font-size: 12px; color: #888; cursor: pointer; user-select: none; margin-bottom: 5px;">Technical logs</summary>
+                <summary style="font-size: 12px; color: #888; cursor: pointer; user-select: none; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                    <span id="logSummary">Technical logs</span>
+                    <button
+                        id="copyLogsBtn"
+                        type="button"
+                        onclick="copyTechnicalLogs(event)"
+                        style="background: #2a2a2a; color: #ddd; border: 1px solid #444; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;"
+                    >
+                        Copy logs
+                    </button>
+                </summary>
                 <div id="log-container" style="margin-top: 5px;"></div>
             </details>
             <p id="message">Initializing...</p>
@@ -395,6 +405,60 @@
         // Localization logic
         const lang = navigator.language || navigator.userLanguage;
         const isRussian = lang.startsWith('ru');
+
+        function getTechnicalLogsText() {
+            const logContainer = document.getElementById('log-container');
+            if (!logContainer) return '';
+            return Array.from(logContainer.querySelectorAll('div'))
+                .map((item) => item.textContent || '')
+                .join('\n')
+                .trim();
+        }
+
+        async function copyTechnicalLogs(event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+
+            const copyBtn = document.getElementById('copyLogsBtn');
+            const originalText = isRussian ? 'Копировать логи' : 'Copy logs';
+            const copiedText = isRussian ? 'Скопировано' : 'Copied';
+            const emptyText = isRussian ? 'Логи пусты' : 'No logs';
+            const failedText = isRussian ? 'Ошибка копирования' : 'Copy failed';
+            const logsText = getTechnicalLogsText();
+
+            if (!copyBtn) return;
+
+            if (!logsText) {
+                copyBtn.textContent = emptyText;
+                setTimeout(() => { copyBtn.textContent = originalText; }, 1500);
+                return;
+            }
+
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(logsText);
+                } else {
+                    const tempArea = document.createElement('textarea');
+                    tempArea.value = logsText;
+                    tempArea.setAttribute('readonly', '');
+                    tempArea.style.position = 'absolute';
+                    tempArea.style.left = '-9999px';
+                    document.body.appendChild(tempArea);
+                    tempArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(tempArea);
+                }
+                copyBtn.textContent = copiedText;
+            } catch (error) {
+                copyBtn.textContent = failedText;
+            }
+
+            setTimeout(() => {
+                copyBtn.textContent = originalText;
+            }, 1500);
+        }
 
         function setInputSource(source) {
             inputSource = source;
@@ -492,6 +556,8 @@
 
                 const logSummary = document.getElementById('logSummary');
                 if (logSummary) logSummary.textContent = 'Технические логи';
+                const copyLogsBtn = document.getElementById('copyLogsBtn');
+                if (copyLogsBtn) copyLogsBtn.textContent = 'Копировать логи';
             } else if (isRussian) {
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
                 document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
@@ -936,6 +1002,11 @@
                 } catch (e) {
                     console.error("Cancel failed:", e);
                 }
+
+                const logSummary2 = document.getElementById('logSummary');
+                if (logSummary2) logSummary2.textContent = 'Технические логи';
+                const copyLogsBtn2 = document.getElementById('copyLogsBtn');
+                if (copyLogsBtn2) copyLogsBtn2.textContent = 'Копировать логи';
             }
         }
     </script>

@@ -395,7 +395,6 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'log_t_steps': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios', 'web', 'mweb', 'tv'],
                 'skip': ['po_token'] if active_cookie_file or active_cookies_browser else []
             }
         } if is_youtube else (
@@ -444,10 +443,14 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     else:
         # Format mapping for better control
         if quality == 'best':
-            format_str = 'bestvideo+bestaudio/best'
+            format_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
         else:
-            # Try to get the specific resolution or the next best thing below it
-            format_str = f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]'
+            # Prefer MP4 video + M4A audio so yt-dlp does not fall back to a low progressive format.
+            format_str = (
+                f'bestvideo[ext=mp4][height<={quality}]+bestaudio[ext=m4a]/'
+                f'bestvideo[height<={quality}]+bestaudio/'
+                f'best[ext=mp4][height<={quality}]/best[height<={quality}]'
+            )
 
         quality_suffix = f"_{quality}p" if quality != 'best' else "_best"
         ydl_opts['format'] = format_str
@@ -474,19 +477,44 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
 
     info = None
     ydl_instance = None
-    for attempt in range(2):
+    retry_without_cookies = False
+    for attempt in range(3):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 ydl_instance = ydl
+                requested_formats = info.get('requested_formats') or []
+                if requested_formats:
+                    selected = "+".join(str(item.get("format_id")) for item in requested_formats if item.get("format_id"))
+                else:
+                    selected = str(info.get("format_id") or "unknown")
+                msg = f"Selected format: {selected}, ext={info.get('ext')}"
+                print(msg)
+                if progress_callback:
+                    progress_callback({'type': 'status', 'msg': msg})
                 break
         except Exception as e:
             error_str = str(e)
+            lower_error = error_str.lower()
             if attempt == 0 and ydl_opts.get('impersonate') and ('Impersonate target' in error_str or 'curl_cffi' in error_str):
                 print("WARNING: Impersonation is not available on this system. Retrying without impersonation...")
                 if progress_callback:
                     progress_callback({'type': 'status', 'msg': "WARNING: Impersonation not supported. Retrying..."})
                 ydl_opts['impersonate'] = None
+                continue
+            if (
+                is_youtube
+                and not retry_without_cookies
+                and ('cookies are no longer valid' in lower_error or 'failed to extract any player response' in lower_error)
+                and (ydl_opts.get('cookiefile') or ydl_opts.get('cookiesfrombrowser'))
+            ):
+                print("WARNING: YouTube cookies appear invalid. Retrying without cookies...")
+                if progress_callback:
+                    progress_callback({'type': 'status', 'msg': "WARNING: YouTube cookies appear invalid. Retrying without cookies..."})
+                ydl_opts['cookiefile'] = None
+                ydl_opts['cookiesfrombrowser'] = None
+                ydl_opts['extractor_args'] = {'youtube': {}}
+                retry_without_cookies = True
                 continue
             
             # General cleanup try for any partial files
