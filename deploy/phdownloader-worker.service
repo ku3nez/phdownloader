@@ -1,0 +1,19 @@
+[Unit]
+Description=phdownloader RQ worker
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/opt/phdownloader
+EnvironmentFile=/opt/phdownloader/.env
+ExecStart=/bin/bash -lc 'set -euo pipefail; workers=${RQ_WORKER_PROCESSES:-1}; pids=""; i=1; while [ "$i" -le "$workers" ]; do /opt/phdownloader/venv/bin/rq worker ${RQ_WORKER_QUEUES:-phdownloader-default} --url "$REDIS_URL" & pids="$pids $!"; i=$((i+1)); done; trap "kill $pids 2>/dev/null || true" TERM INT; wait -n $pids'
+Restart=always
+RestartSec=3
+StandardOutput=append:/var/log/phdownloader-worker.log
+StandardError=append:/var/log/phdownloader-worker.log
+Environment=PYTHONUNBUFFERED=1
+Environment=OMP_NUM_THREADS=1
+Environment=OMP_WAIT_POLICY=PASSIVE
+
+[Install]
+WantedBy=multi-user.target

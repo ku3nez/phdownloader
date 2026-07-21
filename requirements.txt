@@ -2,3 +2,6 @@ yt-dlp
 flask
 python-dotenv
 faster-whisper
+redis
+rq
+gunicorn

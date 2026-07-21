@@ -49,7 +49,7 @@ def get_media_duration(file_path):
         print(f"Error getting duration with ffprobe: {e}")
     return 0.0
 
-def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='base', total_duration=0, progress_callback=None, check_cancel=None):
+def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='base', total_duration=0, progress_callback=None, check_cancel=None, return_segments=False):
     """Transcribe audio file using Whisper AI with optional formatting."""
     if progress_callback:
         progress_callback({'type': 'status', 'msg': "Preparing audio..."})
@@ -58,6 +58,9 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
     from faster_whisper.audio import decode_audio
     import numpy as np
     import logging
+    import threading
+    import queue
+    import time
     
     # Configure faster_whisper logger capture to send logs to the client
     fw_logger = logging.getLogger("faster_whisper")
@@ -124,14 +127,64 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
             progress_callback({'type': 'status', 'msg': msg})
             
         segments, _ = model.transcribe(audio_samples, beam_size=5, vad_filter=True)
+        if progress_callback:
+            progress_callback({'type': 'status', 'msg': "[Whisper] Transcription iterator created, waiting for first segment..."})
+
+        segment_queue = queue.Queue()
+        worker_error = []
+        worker_done = threading.Event()
+
+        def collect_segments():
+            try:
+                for segment in segments:
+                    segment_queue.put(segment)
+            except Exception as exc:
+                worker_error.append(exc)
+            finally:
+                worker_done.set()
+
+        worker = threading.Thread(target=collect_segments, daemon=True)
+        worker.start()
     
+        segments_data = []
         with open(output_path, "w", encoding="utf-8") as f:
             first_segment = True
             last_logged_percent = -1.0
-            for segment in segments:
+            first_segment_seen = False
+            wait_started_at = time.monotonic()
+            last_heartbeat_at = wait_started_at
+            while True:
+                try:
+                    segment = segment_queue.get(timeout=5)
+                except queue.Empty:
+                    now = time.monotonic()
+                    if worker_done.is_set():
+                        break
+                    if progress_callback and now - last_heartbeat_at >= 15:
+                        elapsed = int(now - wait_started_at)
+                        progress_callback({
+                            'type': 'status',
+                            'msg': f"[Whisper] Still processing, no segments emitted yet ({elapsed}s elapsed)"
+                                if not first_segment_seen else
+                                f"[Whisper] Still processing remaining audio ({elapsed}s since transcription started)"
+                        })
+                        last_heartbeat_at = now
+                    if check_cancel and check_cancel():
+                        raise Exception("Transcription cancelled while waiting for Whisper output")
+                    continue
+
+                if not first_segment_seen and progress_callback:
+                    elapsed = int(time.monotonic() - wait_started_at)
+                    progress_callback({'type': 'status', 'msg': f"[Whisper] First segment received after {elapsed}s"})
+                first_segment_seen = True
                 text_part = segment.text.strip()
                 if not text_part:
                     continue
+                segments_data.append({
+                    'start': float(segment.start),
+                    'end': float(segment.end),
+                    'text': text_part,
+                })
                     
                 if structured:
                     timestamp = f"[{int(segment.start // 60):02d}:{int(segment.start % 60):02d}] "
@@ -165,6 +218,9 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
                 if check_cancel and check_cancel():
                     print(f"Stopping transcription loop for user request")
                     raise Exception("Transcription cancelled by user")
+
+            if worker_error:
+                raise worker_error[0]
         
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcription complete."})
@@ -179,6 +235,8 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
         except:
             pass
             
+    if return_segments:
+        return segments_data
     return output_path
 
 def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None, metadata_callback=None, check_cancel=None):
