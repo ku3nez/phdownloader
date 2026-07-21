@@ -2,6 +2,7 @@ import yt_dlp
 import sys
 import os
 import traceback
+import time
 from dotenv import load_dotenv
 import builtins
 
@@ -515,6 +516,17 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                 ydl_opts['cookiesfrombrowser'] = None
                 ydl_opts['extractor_args'] = {'youtube': {}}
                 retry_without_cookies = True
+                continue
+            if (
+                is_youtube
+                and attempt < 2
+                and ('failed to extract any player response' in lower_error or 'failed to parse json' in lower_error)
+            ):
+                delay = 2 * (attempt + 1)
+                print(f"WARNING: Transient YouTube extraction failure. Retrying in {delay}s...")
+                if progress_callback:
+                    progress_callback({'type': 'status', 'msg': f"WARNING: Transient YouTube extraction failure. Retrying in {delay}s..."})
+                time.sleep(delay)
                 continue
             
             # General cleanup try for any partial files
