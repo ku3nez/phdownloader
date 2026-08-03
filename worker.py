@@ -5,6 +5,7 @@ import shutil
 import socket
 import subprocess
 import traceback
+from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
@@ -25,12 +26,26 @@ load_dotenv()
 store = TaskStore()
 NODE_NAME = socket.gethostname()
 TERMINAL_TASK_STATUSES = {"cancelled", "failed", "completed"}
+DOWNLOAD_LINKS_LOG_PATH = os.path.abspath(os.getenv("DOWNLOAD_LINKS_LOG_PATH", "download_links.log"))
 
 
 def log_event(task_id: str, message: str) -> None:
     line = f"[{task_id}] {message}"
     print(line, flush=True)
     store.append_log(task_id, line)
+
+
+def log_download_link(url: str, file_path: str) -> bool:
+    """Append the source URL and the resulting file name to the download log."""
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    filename = os.path.basename(file_path)
+    try:
+        with open(DOWNLOAD_LINKS_LOG_PATH, "a", encoding="utf-8") as handle:
+            handle.write(f"{timestamp}\t{filename}\t{url}\n")
+        return True
+    except OSError as exc:
+        print(f"Failed to write download links log {DOWNLOAD_LINKS_LOG_PATH}: {exc}", flush=True)
+        return False
 
 
 def format_timestamp(seconds: float) -> str:
@@ -496,6 +511,8 @@ def process_remote_media(task_id: str, url: str, quality: str = "720", download_
             os.replace(filename, server_path)
             final_path = server_path
         store.set_status(task_id, "completed", filename=final_path, progress=100, server_only=server_only, error=None)
+        if not log_download_link(url, final_path):
+            log_event(task_id, f"warning: failed to write download link log path={DOWNLOAD_LINKS_LOG_PATH}")
         log_event(task_id, f"completed filename={final_path}")
     except Exception as exc:
         store.set_status(task_id, "failed", error=str(exc))

@@ -408,7 +408,6 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else None,
         'http_headers': {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
