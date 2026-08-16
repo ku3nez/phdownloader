@@ -18,7 +18,7 @@ require_python_311() {
 
 echo "=== 1. Installing System Dependencies ==="
 apt-get update
-apt-get install -y python3.11 python3.11-venv ffmpeg fail2ban curl
+apt-get install -y python3.11 python3.11-venv ffmpeg fail2ban curl aria2
 
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "Error: $PYTHON_BIN is not installed. Install Python 3.11 or set PYTHON_BIN to a Python 3.11+ executable."

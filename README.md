@@ -59,7 +59,7 @@ Browser -> Flask API -> Redis/RQ queues -> one or more RQ workers
     git clone <repository-url>
     cd phdownloader
     ```
-2.  **External dependencies**: use Python **3.11 or newer** and install FFmpeg. The dependency set installs `curl-cffi`, used by `yt-dlp` to impersonate a browser when a video host requires it.
+2.  **External dependencies**: use Python **3.11 or newer**, FFmpeg, and aria2. The deployment script installs them. `aria2` is used for multi-connection media downloads; the dependency set installs `curl-cffi`, used by `yt-dlp` to impersonate a browser when a video host requires it.
 3.  **Install Python dependencies**:
     ```bash
     python3.11 -m pip install -r requirements.txt
