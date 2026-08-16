@@ -92,6 +92,7 @@ Set configuration values in `.env`. Do not commit that file.
 | `TRANSCRIPTION_MIN_DISTRIBUTED_SECONDS` | `900` | Minimum media duration that activates distributed transcription. |
 | `TRANSCRIPTION_CHUNK_SECONDS` | `600` | Target duration of each FFmpeg audio chunk. |
 | `DOWNLOAD_LINKS_LOG_PATH` | `${SHARED_STORAGE_ROOT}/download_links.log` | Optional explicit path for the successful-download source-link log. |
+| `YT_DLP_CONCURRENT_FRAGMENT_DOWNLOADS` | `4` | Simultaneous HLS fragments, clamped to 1–32. Raise this on capable worker nodes to improve HLS download throughput. |
 | `YT_DLP_COOKIE_FILE` | `cookies.txt` | Optional Netscape cookie file for sites that require an authenticated session. |
 | `YT_DLP_COOKIES_BROWSER` | unset | Optional browser name used to read local cookies on the worker. |
 | `YT_DLP_PROXY` | unset | Optional HTTP/SOCKS proxy URL for yt-dlp. |

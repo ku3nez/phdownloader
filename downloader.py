@@ -335,6 +335,12 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     cookies_browser = os.getenv('YT_DLP_COOKIES_BROWSER')
     js_runtime = os.getenv('YT_DLP_JS_RUNTIME', 'node')
     proxy = os.getenv('YT_DLP_PROXY')  # e.g. socks5://127.0.0.1:1080 or http://host:port
+    fragment_concurrency_raw = os.getenv('YT_DLP_CONCURRENT_FRAGMENT_DOWNLOADS', '4')
+    try:
+        fragment_concurrency = int(fragment_concurrency_raw)
+    except ValueError:
+        fragment_concurrency = 4
+    fragment_concurrency = max(1, min(fragment_concurrency, 32))
 
     active_cookie_file = cookie_file if cookie_file and os.path.exists(cookie_file) else None
 
@@ -384,7 +390,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'noplaylist': True,
         'quiet': False,
         'logger': YdlLogger(),
-        'concurrent_fragment_downloads': 4,
+        # HLS videos such as PornHub streams use the native fragment downloader;
+        # aria2 cannot increase their transfer concurrency.
+        'concurrent_fragment_downloads': fragment_concurrency,
         'retries': 30,
         'fragment_retries': 30,
         'retry_sleep_functions': {'http': lambda n: 5 * 2 ** n},
