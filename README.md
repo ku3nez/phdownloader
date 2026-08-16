@@ -59,7 +59,7 @@ Browser -> Flask API -> Redis/RQ queues -> one or more RQ workers
     git clone <repository-url>
     cd phdownloader
     ```
-2.  **External dependencies**: use Python **3.11 or newer**, FFmpeg, and aria2. The deployment script installs them. `aria2` is used for multi-connection media downloads; the dependency set installs `curl-cffi`, used by `yt-dlp` to impersonate a browser when a video host requires it.
+2.  **External dependencies**: use Python **3.11 or newer**, FFmpeg, aria2, and Node.js. The deployment script installs them. `aria2` is used for direct HTTP media files; HLS/DASH and YouTube use yt-dlp's native downloader. `curl-cffi` provides browser impersonation.
 3.  **Install Python dependencies**:
     ```bash
     python3.11 -m pip install -r requirements.txt
@@ -93,7 +93,7 @@ Set configuration values in `.env`. Do not commit that file.
 | `TRANSCRIPTION_CHUNK_SECONDS` | `600` | Target duration of each FFmpeg audio chunk. |
 | `DOWNLOAD_LINKS_LOG_PATH` | `${SHARED_STORAGE_ROOT}/download_links.log` | Optional explicit path for the successful-download source-link log. |
 | `YT_DLP_CONCURRENT_FRAGMENT_DOWNLOADS` | `4` | Simultaneous HLS fragments, clamped to 1–32. Raise this on capable worker nodes to improve HLS download throughput. |
-| `YT_DLP_COOKIE_FILE` | `cookies.txt` | Optional Netscape cookie file for sites that require an authenticated session. |
+| `YT_DLP_COOKIE_FILE` | `cookies.txt` | Optional Netscape cookie file for sites that require an authenticated session. Every node that may process a task must have an up-to-date copy at this path. A configured but missing file is reported in the task log. |
 | `YT_DLP_COOKIES_BROWSER` | unset | Optional browser name used to read local cookies on the worker. |
 | `YT_DLP_PROXY` | unset | Optional HTTP/SOCKS proxy URL for yt-dlp. |
 | `YT_DLP_JS_RUNTIME` | `node` | JavaScript runtime passed to yt-dlp. |

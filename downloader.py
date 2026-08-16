@@ -331,7 +331,8 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             if check_cancel and check_cancel():
                 raise Exception("Download cancelled by user")
 
-    cookie_file = os.getenv('YT_DLP_COOKIE_FILE', 'cookies.txt')
+    configured_cookie_file = os.getenv('YT_DLP_COOKIE_FILE')
+    cookie_file = configured_cookie_file or 'cookies.txt'
     cookies_browser = os.getenv('YT_DLP_COOKIES_BROWSER')
     js_runtime = os.getenv('YT_DLP_JS_RUNTIME', 'node')
     proxy = os.getenv('YT_DLP_PROXY')  # e.g. socks5://127.0.0.1:1080 or http://host:port
@@ -343,6 +344,11 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     fragment_concurrency = max(1, min(fragment_concurrency, 32))
 
     active_cookie_file = cookie_file if cookie_file and os.path.exists(cookie_file) else None
+    if configured_cookie_file and not active_cookie_file:
+        msg = f"WARNING: Configured cookie file is unavailable: {configured_cookie_file}. Continuing without cookies."
+        print(msg)
+        if progress_callback:
+            progress_callback({'type': 'status', 'msg': msg})
 
     # Validate that the browser cookie DB actually exists before trying to use it
     # (fails on VPS/servers where the browser is not installed)
@@ -374,19 +380,28 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': f"WARNING: Browser '{cookies_browser}' not found, trying without browser cookies..."})
 
-    import shutil
-    has_aria2 = shutil.which('aria2c') is not None
-    if has_aria2:
-        print("Using external downloader: aria2c (multithreaded)")
-
     is_youtube = 'youtube.com' in url.lower() or 'youtu.be' in url.lower()
     is_ph = 'pornhub.com' in url.lower()
 
+    import shutil
+    has_aria2 = shutil.which('aria2c') is not None
+    # Googlevideo signed URLs can reject aria2c with HTTP 403. Use yt-dlp's
+    # native downloader for all YouTube media; it retains the extractor's
+    # headers and request handling. For other sites, aria2c remains useful for
+    # direct HTTP files while native downloaders handle HLS/DASH fragments.
+    use_aria2 = has_aria2 and not is_youtube
+    if use_aria2:
+        print("Using aria2c for direct HTTP downloads; native downloader for HLS/DASH streams")
+
     ydl_opts = {
-        'external_downloader': 'aria2c' if has_aria2 else None,
+        'external_downloader': {
+            'default': 'aria2c',
+            'm3u8': 'native',
+            'dash': 'native',
+        } if use_aria2 else None,
         'external_downloader_args': {
             'aria2c': ['-x', '16', '-s', '16', '-k', '1M', '--min-split-size=1M']
-        } if has_aria2 else None,
+        } if use_aria2 else None,
         'noplaylist': True,
         'quiet': False,
         'logger': YdlLogger(),
@@ -513,7 +528,11 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             if (
                 is_youtube
                 and not retry_without_cookies
-                and ('cookies are no longer valid' in lower_error or 'failed to extract any player response' in lower_error)
+                and (
+                    'cookies are no longer valid' in lower_error
+                    or 'failed to extract any player response' in lower_error
+                    or 'http error 403' in lower_error
+                )
                 and (ydl_opts.get('cookiefile') or ydl_opts.get('cookiesfrombrowser'))
             ):
                 print("WARNING: YouTube cookies appear invalid. Retrying without cookies...")
