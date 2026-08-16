@@ -1,4 +1,6 @@
-yt-dlp
+# `curl-cffi` supplies browser TLS impersonation targets required by PornHub and
+# other services that reject requests with a non-browser TLS fingerprint.
+yt-dlp[default,curl-cffi]
 flask
 python-dotenv
 faster-whisper

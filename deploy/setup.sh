@@ -1,6 +1,6 @@
 #!/bin/bash
-# Exit immediately if a command exits with a non-zero status
-set -e
+# Exit on errors, unset variables, and pipeline errors.
+set -euo pipefail
 
 # 1. Check if run as root
 if [ "$EUID" -ne 0 ]; then
@@ -10,17 +10,34 @@ fi
 
 PROJECT_DIR="/opt/phdownloader"
 VENV_DIR="$PROJECT_DIR/venv"
+PYTHON_BIN="${PYTHON_BIN:-python3.11}"
+
+require_python_311() {
+  "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'
+}
 
 echo "=== 1. Installing System Dependencies ==="
 apt-get update
-apt-get install -y python3 python3-pip python3-venv ffmpeg fail2ban curl
+apt-get install -y python3.11 python3.11-venv ffmpeg fail2ban curl
+
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  echo "Error: $PYTHON_BIN is not installed. Install Python 3.11 or set PYTHON_BIN to a Python 3.11+ executable."
+  exit 1
+fi
+if ! require_python_311 "$PYTHON_BIN"; then
+  echo "Error: $PYTHON_BIN must be Python 3.11 or newer."
+  exit 1
+fi
 
 echo "=== 2. Setting up Python Virtual Environment ==="
-if [ ! -d "$VENV_DIR" ]; then
-  echo "Creating virtual environment in $VENV_DIR..."
-  python3 -m venv "$VENV_DIR"
-else
-  echo "Virtual environment already exists."
+if [ -x "$VENV_DIR/bin/python" ] && ! require_python_311 "$VENV_DIR/bin/python"; then
+  backup_dir="${VENV_DIR}.python310.$(date +%Y%m%d%H%M%S)"
+  echo "Existing virtual environment uses Python below 3.11; moving it to $backup_dir"
+  mv "$VENV_DIR" "$backup_dir"
+fi
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+  echo "Creating virtual environment in $VENV_DIR with $PYTHON_BIN..."
+  "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
 
 echo "=== 3. Installing Python Dependencies ==="
@@ -32,25 +49,30 @@ if [ -f "$PROJECT_DIR/requirements.txt" ]; then
 else
   echo "Warning: requirements.txt not found in $PROJECT_DIR."
 fi
+"$VENV_DIR/bin/python" -c 'import sys, curl_cffi, yt_dlp; assert sys.version_info >= (3, 11); print(f"Python {sys.version.split()[0]}, yt-dlp {yt_dlp.version.__version__}, curl-cffi {curl_cffi.__version__}")'
 
-echo "=== 4. Configuring Systemd Daemon ==="
-# Copy service template and replace Python executable path to use the venv
-if [ -f "$PROJECT_DIR/phdownloader.service" ]; then
-  sed "s|/usr/bin/python3|$VENV_DIR/bin/python3|g" "$PROJECT_DIR/phdownloader.service" > /etc/systemd/system/phdownloader.service
-  echo "Systemd service file installed to /etc/systemd/system/phdownloader.service"
-else
-  echo "Error: phdownloader.service template not found!"
+echo "=== 4. Configuring Systemd services ==="
+if [ ! -f "$PROJECT_DIR/deploy/phdownloader-api.service" ] || [ ! -f "$PROJECT_DIR/deploy/phdownloader-worker.service" ]; then
+  echo "Error: API or worker systemd service template not found."
   exit 1
 fi
+cp "$PROJECT_DIR/deploy/phdownloader-api.service" /etc/systemd/system/phdownloader-api.service
+cp "$PROJECT_DIR/deploy/phdownloader-worker.service" /etc/systemd/system/phdownloader-worker.service
 
 # Ensure log file exists and is writable
 touch /var/log/phdownloader.log
 chmod 640 /var/log/phdownloader.log
 
-# Reload systemd, enable and start the service
+# The legacy single-process service cannot process RQ jobs. Stop it before the
+# API is restarted so it cannot keep the API port occupied during migration.
+if systemctl cat phdownloader >/dev/null 2>&1; then
+  systemctl disable --now phdownloader
+fi
+
+# Reload systemd, enable and start the API and its RQ worker.
 systemctl daemon-reload
-systemctl enable phdownloader
-systemctl restart phdownloader
+systemctl enable phdownloader-api phdownloader-worker
+systemctl restart phdownloader-api phdownloader-worker
 
 echo "=== 5. Configuring Fail2ban ==="
 # Copy fail2ban filter
@@ -75,8 +97,11 @@ fi
 systemctl restart fail2ban
 
 echo "=== 6. Verification Status ==="
-echo "Checking phdownloader service status:"
-systemctl is-active phdownloader || echo "phdownloader service is NOT active"
+echo "Checking phdownloader API service status:"
+systemctl is-active phdownloader-api || echo "phdownloader-api service is NOT active"
+
+echo "Checking phdownloader worker service status:"
+systemctl is-active phdownloader-worker || echo "phdownloader-worker service is NOT active"
 
 echo "Checking fail2ban service status:"
 systemctl is-active fail2ban || echo "fail2ban is NOT active"

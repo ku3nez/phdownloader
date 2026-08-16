@@ -556,7 +556,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': f"ERROR: {error_msg}"})
                 progress_callback({'type': 'status', 'msg': "Check server console for full traceback."})
-            return None
+            # Propagate the extractor error to the RQ job. Returning None masks
+            # the actual cause with the misleading "without output file" error.
+            raise RuntimeError(error_msg) from e
 
     if info and ydl_instance:
         if metadata_callback:

@@ -35,31 +35,27 @@ A web-based video downloader powered by Flask and `yt-dlp`. Supports a video hos
     git clone <repository-url>
     cd phdownloader
     ```
-2.  **External Dependencies**: Ensure `ffmpeg` is installed on your system for audio extraction.
+2.  **External Dependencies**: Use Python **3.11 or newer** and ensure `ffmpeg` is installed for audio extraction. The dependency set installs `curl-cffi`, used by `yt-dlp` to impersonate a browser when a video host requires it.
 3.  **Install Python dependencies**:
     ```bash
-    pip install -r requirements.txt
+    python3.11 -m pip install -r requirements.txt
     ```
 4.  **Run the application**:
     ```bash
-    python app.py
+    python3.11 app.py
     ```
     The app will be available at `http://localhost:5008`.
 
 ## Deployment (Linux Systemd)
 
-The project includes a `phdownloader.service` template for permanent deployment on Linux servers.
+The application requires separate API and RQ worker services. On the server, run the deployment script after copying the project to `/opt/phdownloader` and configuring `/opt/phdownloader/.env` (including `REDIS_URL`):
 
-1.  Copy the service file to systemd:
-    ```bash
-    sudo cp phdownloader.service /etc/systemd/system/
-    ```
-2.  Reload and start:
-    ```bash
-    sudo systemctl daemon-reload
-    sudo systemctl enable phdownloader
-    sudo systemctl start phdownloader
-    ```
+```bash
+cd /opt/phdownloader
+sudo ./deploy/setup.sh
+```
+
+The script requires and creates a Python 3.11+ virtual environment, installs `curl-cffi`, and starts `phdownloader-api` and `phdownloader-worker`. If an existing virtual environment uses Python 3.10, it is preserved with a timestamped `.python310.*` suffix and replaced.
 
 ## Development
 
