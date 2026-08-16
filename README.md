@@ -57,6 +57,8 @@ sudo ./deploy/setup.sh
 
 The script requires and creates a Python 3.11+ virtual environment, installs `curl-cffi`, and starts `phdownloader-api` and `phdownloader-worker`. If an existing virtual environment uses Python 3.10, it is preserved with a timestamped `.python310.*` suffix and replaced.
 
+Downloaded-media links are logged in `${SHARED_STORAGE_ROOT}/download_links.log` by default. Set `DOWNLOAD_LINKS_LOG_PATH` in `.env` only when a different shared path is required.
+
 ## Development
 
 *   **Backend**: Python (Flask, Threading)

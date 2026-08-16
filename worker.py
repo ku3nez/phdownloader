@@ -13,6 +13,7 @@ from rq import Retry
 
 from cluster_config import (
     RQ_TRANSCRIPT_QUEUE_NAME,
+    SHARED_STORAGE_ROOT,
     TASKS_ROOT,
     TRANSCRIPTION_CHUNK_SECONDS,
     TRANSCRIPTION_DISTRIBUTED_ENABLED,
@@ -26,7 +27,12 @@ load_dotenv()
 store = TaskStore()
 NODE_NAME = socket.gethostname()
 TERMINAL_TASK_STATUSES = {"cancelled", "failed", "completed"}
-DOWNLOAD_LINKS_LOG_PATH = os.path.abspath(os.getenv("DOWNLOAD_LINKS_LOG_PATH", "download_links.log"))
+# The default lives on the shared volume, so every worker writes to one log
+# regardless of the node that processed the download. An explicit environment
+# variable may still override the location.
+DOWNLOAD_LINKS_LOG_PATH = os.path.abspath(
+    os.getenv("DOWNLOAD_LINKS_LOG_PATH", os.path.join(SHARED_STORAGE_ROOT, "download_links.log"))
+)
 
 
 def log_event(task_id: str, message: str) -> None:
