@@ -16,6 +16,7 @@ from cluster_config import (
     ENABLE_SAVE_ON_SERVER,
     FILE_EXPIRATION_SECONDS,
     RQ_DEFAULT_QUEUE_NAME,
+    RQ_PORNHUB_QUEUE_NAME,
     RQ_TRANSCRIPT_QUEUE_NAME,
     SHARED_STORAGE_ROOT,
     TASKS_ROOT,
@@ -266,7 +267,12 @@ def start_download():
             server_only=server_only,
         )
     else:
-        queue_name = RQ_TRANSCRIPT_QUEUE_NAME if download_type == "transcript" else RQ_DEFAULT_QUEUE_NAME
+        if download_type == "transcript":
+            queue_name = RQ_TRANSCRIPT_QUEUE_NAME
+        elif "pornhub.com" in url.lower():
+            queue_name = RQ_PORNHUB_QUEUE_NAME
+        else:
+            queue_name = RQ_DEFAULT_QUEUE_NAME
         job = store.enqueue(
             "worker.process_remote_media",
             task_id,

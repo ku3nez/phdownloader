@@ -86,8 +86,9 @@ Set configuration values in `.env`. Do not commit that file.
 | `SHARED_STORAGE_ROOT` | `downloads` | Shared directory mounted identically on the API and every worker node. |
 | `RQ_DEFAULT_QUEUE_NAME` | `phdownloader-default` | Queue for video and audio downloads. |
 | `RQ_TRANSCRIPT_QUEUE_NAME` | `phdownloader-transcript` | Queue for transcription and distributed chunks. |
+| `RQ_PORNHUB_QUEUE_NAME` | `phdownloader-pornhub` | Dedicated queue for PornHub downloads. Assign it only to workers whose IP is accepted by PornHub. |
 | `RQ_WORKER_PROCESSES` | `1` | Worker processes started by the systemd worker unit. |
-| `RQ_WORKER_QUEUES` | `phdownloader-default` | Queues consumed by the systemd worker unit. Include the transcription queue when this node handles transcription. |
+| `RQ_WORKER_QUEUES` | `phdownloader-default` | Queues consumed by the systemd worker unit. Include the transcription and PornHub queues only on nodes assigned to those workloads. |
 | `TRANSCRIPTION_DISTRIBUTED_ENABLED` | `true` | Enables splitting long media into distributed transcription chunks. |
 | `TRANSCRIPTION_MIN_DISTRIBUTED_SECONDS` | `900` | Minimum media duration that activates distributed transcription. |
 | `TRANSCRIPTION_CHUNK_SECONDS` | `600` | Target duration of each FFmpeg audio chunk. |
