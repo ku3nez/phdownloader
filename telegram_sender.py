@@ -74,29 +74,32 @@ def build_video_thumbnail(file_path: str, seek_seconds: float) -> str | None:
     fd, thumbnail_path = tempfile.mkstemp(prefix="telegram-thumb-", suffix=".jpg", dir=os.path.dirname(file_path))
     os.close(fd)
     try:
-        result = subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-ss",
-                f"{seek_seconds:.3f}",
-                "-i",
-                file_path,
-                "-frames:v",
-                "1",
-                "-vf",
-                "scale=240:-2",
-                "-q:v",
-                "10",
-                thumbnail_path,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=30,
-            check=False,
-        )
-        if result.returncode == 0 and os.path.getsize(thumbnail_path) <= 200 * 1024:
-            return thumbnail_path
+        # Telegram accepts JPEG thumbnails up to 320 px and 200 KiB. Try the
+        # least compressed image first, then only reduce quality if necessary.
+        for quality in (2, 3, 4, 6, 8, 10):
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-ss",
+                    f"{seek_seconds:.3f}",
+                    "-i",
+                    file_path,
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=320:-2",
+                    "-q:v",
+                    str(quality),
+                    thumbnail_path,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+                check=False,
+            )
+            if result.returncode == 0 and os.path.getsize(thumbnail_path) <= 200 * 1024:
+                return thumbnail_path
     except (OSError, subprocess.TimeoutExpired):
         pass
     try:
