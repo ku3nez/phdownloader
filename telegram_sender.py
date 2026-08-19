@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def _settings() -> tuple[int, str, str, str]:
+def _settings() -> tuple[int, str, int, str]:
     api_id_raw = os.getenv("TELEGRAM_API_ID", "").strip()
     api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
     target_chat_id = os.getenv("TELEGRAM_TARGET_CHAT_ID", "").strip()
@@ -25,7 +25,11 @@ def _settings() -> tuple[int, str, str, str]:
         api_id = int(api_id_raw)
     except ValueError as exc:
         raise RuntimeError("TELEGRAM_API_ID must be numeric") from exc
-    return api_id, api_hash, target_chat_id, session_path
+    try:
+        numeric_target_chat_id = int(target_chat_id)
+    except ValueError as exc:
+        raise RuntimeError("TELEGRAM_TARGET_CHAT_ID must be a numeric Telegram chat ID") from exc
+    return api_id, api_hash, numeric_target_chat_id, session_path
 
 
 def caption_for_file(file_path: str) -> str:
