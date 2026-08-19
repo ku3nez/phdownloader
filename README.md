@@ -33,6 +33,7 @@ A web application for downloading media and creating transcripts. Flask accepts 
 - **Cancellation and cleanup:** queued/running tasks can be cancelled. Expired completed task directories are removed automatically; active tasks are protected by an `.active` marker.
 - **Shared storage:** API and workers use `SHARED_STORAGE_ROOT`; it must point to the same mounted directory on every node that participates in a cluster.
 - **Source-link audit log:** each successful remote media download is appended to `${SHARED_STORAGE_ROOT}/download_links.log`, independent of which worker processed it.
+- **Optional Telegram publication:** PornHub video requests can be marked for MTProto publication after download. The message caption is the downloaded title without its extension or quality suffix.
 
 ### Web interface
 
@@ -87,6 +88,7 @@ Set configuration values in `.env`. Do not commit that file.
 | `RQ_DEFAULT_QUEUE_NAME` | `phdownloader-default` | Queue for video and audio downloads. |
 | `RQ_TRANSCRIPT_QUEUE_NAME` | `phdownloader-transcript` | Queue for transcription and distributed chunks. |
 | `RQ_PORNHUB_QUEUE_NAME` | `phdownloader-pornhub` | Dedicated queue for PornHub downloads. Assign it only to workers whose IP is accepted by PornHub. |
+| `RQ_TELEGRAM_QUEUE_NAME` | `phdownloader-telegram` | Dedicated queue for Telegram publication. Assign it to exactly one node that holds the Telegram account session. |
 | `RQ_WORKER_PROCESSES` | `1` | Worker processes started by the systemd worker unit. |
 | `RQ_WORKER_QUEUES` | `phdownloader-default` | Queues consumed by the systemd worker unit. Include the transcription and PornHub queues only on nodes assigned to those workloads. |
 | `TRANSCRIPTION_DISTRIBUTED_ENABLED` | `true` | Enables splitting long media into distributed transcription chunks. |
@@ -98,6 +100,26 @@ Set configuration values in `.env`. Do not commit that file.
 | `YT_DLP_COOKIES_BROWSER` | unset | Optional browser name used to read local cookies on the worker. |
 | `YT_DLP_PROXY` | unset | Optional HTTP/SOCKS proxy URL for yt-dlp. |
 | `YT_DLP_JS_RUNTIME` | `node` | JavaScript runtime passed to yt-dlp. |
+| `TELEGRAM_API_ID` | unset | Telegram application ID; keep only in the publishing node’s `.env`. |
+| `TELEGRAM_API_HASH` | unset | Telegram application hash; keep only in the publishing node’s `.env`. |
+| `TELEGRAM_PHONE` | unset | Phone number of the Telegram account used for publication. |
+| `TELEGRAM_TARGET_CHAT_ID` | unset | Numeric ID of the target group/channel. |
+| `TELEGRAM_SESSION_PATH` | `/opt/phdownloader/telegram.session` | MTProto session file, never commit or share it. |
+| `TELEGRAM_AUTH_STATE_PATH` | `/opt/phdownloader/telegram-auth.json` | Temporary authorization state; it is deleted after successful login. |
+
+### Telegram publication
+
+This uses a Telegram **user account** through MTProto rather than a bot, so videos above 50 MB can be sent (subject to the account's Telegram upload limit). Add `phdownloader-telegram` only to the selected node’s `RQ_WORKER_QUEUES`; the session and all `TELEGRAM_*` secrets must exist only there.
+
+The web control is intentionally absent from normal use. Open the application with `#telegram` in the URL, paste a PornHub URL, select video, then enable **Send to Telegram**. A confirmation is shown before the task is created. The backend rejects Telegram publication for any non-PornHub-video request.
+
+Authorize the account once on the publishing node, then discover the target ID:
+
+```bash
+/opt/phdownloader/venv/bin/python telegram_auth.py request-code
+/opt/phdownloader/venv/bin/python telegram_auth.py complete-code --code <telegram-code>
+/opt/phdownloader/venv/bin/python telegram_auth.py list-dialogs
+```
 
 ## Deployment (Linux Systemd)
 

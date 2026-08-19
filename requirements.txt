@@ -7,3 +7,4 @@ faster-whisper
 redis
 rq
 gunicorn
+telethon

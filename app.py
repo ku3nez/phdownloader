@@ -215,6 +215,7 @@ def start_download():
         structured = request.json.get("structured", True)
         model_size = request.json.get("model_size", "base")
         server_only = request.json.get("server_only", False)
+        publish_to_telegram = request.json.get("publish_to_telegram", False)
     else:
         url = request.form.get("url")
         file = request.files.get("file")
@@ -223,8 +224,14 @@ def start_download():
         structured = request.form.get("structured", "true").lower() == "true"
         model_size = request.form.get("model_size", "base")
         server_only = request.form.get("server_only", "false").lower() == "true"
+        publish_to_telegram = request.form.get("publish_to_telegram", "false").lower() == "true"
 
-    log_event("HTTP", f"Parsed start payload url_present={bool(url)} file_present={bool(file)} quality={quality} download_type={download_type} structured={structured} model_size={model_size} server_only={server_only}")
+    publish_to_telegram = bool(publish_to_telegram)
+    is_pornhub_video = bool(url) and "pornhub.com" in url.lower() and download_type == "video"
+    if publish_to_telegram and not is_pornhub_video:
+        return jsonify({"error": "Telegram publishing is available only for PornHub video downloads"}), 400
+
+    log_event("HTTP", f"Parsed start payload url_present={bool(url)} file_present={bool(file)} quality={quality} download_type={download_type} structured={structured} model_size={model_size} server_only={server_only} publish_to_telegram={publish_to_telegram}")
     if not url and not file:
         return jsonify({"error": "URL or File is required"}), 400
 
@@ -246,6 +253,8 @@ def start_download():
         "download_type": download_type,
         "url": url,
         "worker_node": None,
+        "publish_to_telegram": publish_to_telegram,
+        "telegram_status": "requested" if publish_to_telegram else "not_requested",
     }
     store.save_task(task_id, task)
     store.append_log(task_id, f"[{task_id}] Task created on API node remote_addr={request.remote_addr}")

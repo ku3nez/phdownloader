@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from rq import Retry
 
 from cluster_config import (
+    RQ_TELEGRAM_QUEUE_NAME,
     RQ_TRANSCRIPT_QUEUE_NAME,
     SHARED_STORAGE_ROOT,
     TASKS_ROOT,
@@ -173,6 +174,44 @@ def remove_active_marker(active_marker: str) -> None:
             os.remove(active_marker)
     except Exception:
         pass
+
+
+def enqueue_telegram_publication(task_id: str, file_path: str) -> None:
+    job = store.enqueue(
+        "worker.publish_telegram_video",
+        task_id,
+        file_path,
+        queue_name=RQ_TELEGRAM_QUEUE_NAME,
+    )
+    store.update_task(task_id, telegram_status="queued", telegram_job_id=job.id, telegram_queue_name=job.origin)
+    log_event(task_id, f"Telegram publication queued rq_job_id={job.id} queue={job.origin}")
+
+
+def publish_telegram_video(task_id: str, file_path: str) -> None:
+    """Send a completed PornHub download on the dedicated Telegram worker."""
+    task = store.get_task(task_id)
+    active_marker = os.path.join(TASKS_ROOT, task_id, ".active")
+    if not task:
+        raise RuntimeError(f"Task not found: {task_id}")
+    if task.get("status") == "cancelled" or store.is_cancelled(task_id):
+        store.update_task(task_id, telegram_status="cancelled")
+        log_event(task_id, "Telegram publication skipped because the task was cancelled")
+        remove_active_marker(active_marker)
+        return
+    store.update_task(task_id, telegram_status="processing", telegram_worker_node=NODE_NAME)
+    log_event(task_id, f"Telegram publication started worker_node={NODE_NAME} file={file_path}")
+    try:
+        from telegram_sender import publish_video
+
+        message_id = publish_video(file_path)
+        store.update_task(task_id, telegram_status="completed", telegram_message_id=message_id, telegram_error=None)
+        log_event(task_id, f"Telegram publication completed message_id={message_id}")
+    except Exception as exc:
+        store.update_task(task_id, telegram_status="failed", telegram_error=str(exc))
+        log_event(task_id, f"Telegram publication failed: {exc}")
+        log_event(task_id, traceback.format_exc())
+    finally:
+        remove_active_marker(active_marker)
 
 
 def write_final_transcript(output_path: str, segments: list[dict[str, Any]], structured: bool) -> None:
@@ -510,7 +549,6 @@ def process_remote_media(task_id: str, url: str, quality: str = "720", download_
             log_event(task_id, f"completed filename={final_path}")
             return
 
-        remove_active_marker(active_marker)
         final_path = filename
         if server_only:
             server_path = os.path.join(os.path.dirname(filename), "[SERVER] " + os.path.basename(filename))
@@ -520,6 +558,10 @@ def process_remote_media(task_id: str, url: str, quality: str = "720", download_
         if not log_download_link(url, final_path):
             log_event(task_id, f"warning: failed to write download link log path={DOWNLOAD_LINKS_LOG_PATH}")
         log_event(task_id, f"completed filename={final_path}")
+        if (store.get_task(task_id) or {}).get("publish_to_telegram"):
+            enqueue_telegram_publication(task_id, final_path)
+        else:
+            remove_active_marker(active_marker)
     except Exception as exc:
         store.set_status(task_id, "failed", error=str(exc))
         log_event(task_id, f"failed: {exc}")

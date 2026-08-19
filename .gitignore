@@ -1,3 +1,6 @@
 __pycache__/
 downloads/
 download_links.log
+telegram.session
+telegram.session-journal
+telegram-auth.json

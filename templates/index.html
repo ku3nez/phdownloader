@@ -365,6 +365,12 @@
                     style="font-size: 14px; color: #aaa; cursor: pointer;">Download to server only</label>
             </div>
             {% endif %}
+            <div id="telegramPublishOption" style="margin-bottom: 20px; display: none; align-items: center; justify-content: center;">
+                <input type="checkbox" id="telegramPublishCheckbox"
+                    style="margin-right: 10px; transform: scale(1.2); cursor: pointer;">
+                <label id="telegramPublishLabel" for="telegramPublishCheckbox"
+                    style="font-size: 14px; color: #aaa; cursor: pointer;">Send to Telegram</label>
+            </div>
             <button id="downloadBtn" onclick="startDownload()">Download Video</button>
         </div>
 
@@ -405,6 +411,25 @@
         // Localization logic
         const lang = navigator.language || navigator.userLanguage;
         const isRussian = lang.startsWith('ru');
+
+        function isPornHubVideoRequest() {
+            const url = document.getElementById('urlInput')?.value || '';
+            const format = document.querySelector('input[name="format"]:checked')?.value;
+            try {
+                return inputSource === 'url' && format === 'video' && new URL(url).hostname.toLowerCase().endsWith('pornhub.com');
+            } catch (_) {
+                return false;
+            }
+        }
+
+        function updateTelegramPublishVisibility() {
+            const option = document.getElementById('telegramPublishOption');
+            const checkbox = document.getElementById('telegramPublishCheckbox');
+            if (!option || !checkbox) return;
+            const enabled = window.location.hash === '#telegram' && isPornHubVideoRequest();
+            option.style.display = enabled ? 'flex' : 'none';
+            if (!enabled) checkbox.checked = false;
+        }
 
         function getTechnicalLogsText() {
             const logContainer = document.getElementById('log-container');
@@ -480,6 +505,7 @@
             }
             
             updateButtonText();
+            updateTelegramPublishVisibility();
         }
 
         function handleFileSelect(input) {
@@ -558,6 +584,8 @@
                 if (logSummary) logSummary.textContent = 'Технические логи';
                 const copyLogsBtn = document.getElementById('copyLogsBtn');
                 if (copyLogsBtn) copyLogsBtn.textContent = 'Копировать логи';
+                const telegramPublishLabel = document.getElementById('telegramPublishLabel');
+                if (telegramPublishLabel) telegramPublishLabel.textContent = 'Отправить в Telegram';
             } else if (isRussian) {
                 document.getElementById('urlInput').placeholder = 'Вставьте ссылку здесь...';
                 document.querySelector('label[for="qualitySelect"]').textContent = 'Качество:';
@@ -629,6 +657,10 @@
             }
 
             updateButtonText();
+            updateTelegramPublishVisibility();
+            document.getElementById('urlInput').addEventListener('input', updateTelegramPublishVisibility);
+            document.querySelectorAll('input[name="format"]').forEach((input) => input.addEventListener('change', updateTelegramPublishVisibility));
+            window.addEventListener('hashchange', updateTelegramPublishVisibility);
         });
 
         document.addEventListener('DOMContentLoaded', async () => {
@@ -763,6 +795,16 @@
                 const structured = structuredToggle ? structuredToggle.checked : true;
                 const modelSelect = document.getElementById('modelSelect');
                 const modelSize = modelSelect ? modelSelect.value : 'base';
+                const telegramPublishCheckbox = document.getElementById('telegramPublishCheckbox');
+                const publishToTelegram = Boolean(telegramPublishCheckbox?.checked && isPornHubVideoRequest());
+                if (publishToTelegram && !window.confirm(isRussian
+                    ? 'После скачивания видео будет отправлено в Telegram. Продолжить?'
+                    : 'The downloaded video will be sent to Telegram. Continue?')) {
+                    btn.disabled = false;
+                    statusArea.style.display = 'none';
+                    updateButtonText();
+                    return;
+                }
 
                 let taskId;
 
@@ -788,7 +830,8 @@
                             download_type: format,
                             structured: structured,
                             model_size: modelSize,
-                            server_only: saveOnServer
+                            server_only: saveOnServer,
+                            publish_to_telegram: publishToTelegram
                         })
                     });
 
