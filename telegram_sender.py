@@ -34,7 +34,8 @@ def _settings() -> tuple[int, str, int, str]:
 
 def caption_for_file(file_path: str) -> str:
     """Use the downloaded title, without the file extension, as the caption."""
-    return re.sub(r"_(?:360|480|720|1080|best)$", "", Path(file_path).stem, flags=re.IGNORECASE)
+    title = re.sub(r"^\[SERVER\]\s*", "", Path(file_path).stem, flags=re.IGNORECASE)
+    return re.sub(r"_(?:360|480|720|1080)p?$|_best$", "", title, flags=re.IGNORECASE)
 
 
 async def _publish_video_async(file_path: str) -> int:
