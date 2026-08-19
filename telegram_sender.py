@@ -5,6 +5,7 @@ the node consuming the dedicated Telegram RQ queue needs these settings.
 """
 
 import asyncio
+import json
 import os
 import re
 import subprocess
@@ -40,7 +41,35 @@ def caption_for_file(file_path: str) -> str:
     return re.sub(r"_(?:360|480|720|1080)p?$|_best$", "", title, flags=re.IGNORECASE)
 
 
-def build_video_thumbnail(file_path: str) -> str | None:
+def get_video_metadata(file_path: str) -> tuple[float, int, int]:
+    """Return duration, width and height without optional Python codecs."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height:format=duration",
+                "-of",
+                "json",
+                file_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        data = json.loads(result.stdout)
+        stream = data.get("streams", [{}])[0]
+        return float(data.get("format", {}).get("duration") or 0), int(stream.get("width") or 1), int(stream.get("height") or 1)
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError, json.JSONDecodeError):
+        return 1.0, 1, 1
+
+
+def build_video_thumbnail(file_path: str, seek_seconds: float) -> str | None:
     """Create a compact JPEG thumbnail required for Telegram's video tile."""
     fd, thumbnail_path = tempfile.mkstemp(prefix="telegram-thumb-", suffix=".jpg", dir=os.path.dirname(file_path))
     os.close(fd)
@@ -50,7 +79,7 @@ def build_video_thumbnail(file_path: str) -> str | None:
                 "ffmpeg",
                 "-y",
                 "-ss",
-                "00:00:01",
+                f"{seek_seconds:.3f}",
                 "-i",
                 file_path,
                 "-frames:v",
@@ -79,6 +108,7 @@ def build_video_thumbnail(file_path: str) -> str | None:
 
 async def _publish_video_async(file_path: str) -> int:
     from telethon import TelegramClient
+    from telethon.tl.types import DocumentAttributeVideo
 
     api_id, api_hash, target_chat_id, session_path = _settings()
     if not os.path.isfile(file_path):
@@ -86,7 +116,10 @@ async def _publish_video_async(file_path: str) -> int:
     session_parent = os.path.dirname(session_path)
     if session_parent:
         os.makedirs(session_parent, exist_ok=True)
-    thumbnail_path = build_video_thumbnail(file_path)
+    duration, width, height = get_video_metadata(file_path)
+    # The first seconds often contain a black intro. A frame around 10% into
+    # the video gives a useful preview while keeping the seek bounded.
+    thumbnail_path = build_video_thumbnail(file_path, min(max(duration * 0.1, 3.0), 30.0))
     client = TelegramClient(session_path, api_id, api_hash)
     await client.connect()
     try:
@@ -98,6 +131,14 @@ async def _publish_video_async(file_path: str) -> int:
             caption=caption_for_file(file_path),
             mime_type="video/mp4",
             thumb=thumbnail_path,
+            attributes=[
+                DocumentAttributeVideo(
+                    duration=max(1, int(round(duration))),
+                    w=max(1, width),
+                    h=max(1, height),
+                    supports_streaming=True,
+                )
+            ],
             supports_streaming=True,
             force_document=False,
         )
