@@ -7,6 +7,8 @@ the node consuming the dedicated Telegram RQ queue needs these settings.
 import asyncio
 import os
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -38,6 +40,43 @@ def caption_for_file(file_path: str) -> str:
     return re.sub(r"_(?:360|480|720|1080)p?$|_best$", "", title, flags=re.IGNORECASE)
 
 
+def build_video_thumbnail(file_path: str) -> str | None:
+    """Create a compact JPEG thumbnail required for Telegram's video tile."""
+    fd, thumbnail_path = tempfile.mkstemp(prefix="telegram-thumb-", suffix=".jpg", dir=os.path.dirname(file_path))
+    os.close(fd)
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-ss",
+                "00:00:01",
+                "-i",
+                file_path,
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=240:-2",
+                "-q:v",
+                "10",
+                thumbnail_path,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode == 0 and os.path.getsize(thumbnail_path) <= 200 * 1024:
+            return thumbnail_path
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        os.remove(thumbnail_path)
+    except OSError:
+        pass
+    return None
+
+
 async def _publish_video_async(file_path: str) -> int:
     from telethon import TelegramClient
 
@@ -47,6 +86,7 @@ async def _publish_video_async(file_path: str) -> int:
     session_parent = os.path.dirname(session_path)
     if session_parent:
         os.makedirs(session_parent, exist_ok=True)
+    thumbnail_path = build_video_thumbnail(file_path)
     client = TelegramClient(session_path, api_id, api_hash)
     await client.connect()
     try:
@@ -56,12 +96,19 @@ async def _publish_video_async(file_path: str) -> int:
             target_chat_id,
             file_path,
             caption=caption_for_file(file_path),
+            mime_type="video/mp4",
+            thumb=thumbnail_path,
             supports_streaming=True,
             force_document=False,
         )
         return int(message.id)
     finally:
         await client.disconnect()
+        if thumbnail_path:
+            try:
+                os.remove(thumbnail_path)
+            except OSError:
+                pass
 
 
 def publish_video(file_path: str) -> int:
