@@ -790,13 +790,13 @@
             try {
                 const quality = document.getElementById('qualitySelect').value;
                 const serverOnlyCheckbox = document.getElementById('serverOnlyCheckbox');
-                const saveOnServer = serverOnlyCheckbox ? serverOnlyCheckbox.checked : false;
                 const structuredToggle = document.getElementById('structuredToggle');
                 const structured = structuredToggle ? structuredToggle.checked : true;
                 const modelSelect = document.getElementById('modelSelect');
                 const modelSize = modelSelect ? modelSelect.value : 'base';
                 const telegramPublishCheckbox = document.getElementById('telegramPublishCheckbox');
                 const publishToTelegram = Boolean(telegramPublishCheckbox?.checked && isPornHubVideoRequest());
+                const saveOnServer = Boolean(serverOnlyCheckbox?.checked || publishToTelegram);
                 if (publishToTelegram && !window.confirm(isRussian
                     ? 'После скачивания видео будет отправлено в Telegram. Продолжить?'
                     : 'The downloaded video will be sent to Telegram. Continue?')) {

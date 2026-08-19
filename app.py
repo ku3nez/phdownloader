@@ -230,6 +230,10 @@ def start_download():
     is_pornhub_video = bool(url) and "pornhub.com" in url.lower() and download_type == "video"
     if publish_to_telegram and not is_pornhub_video:
         return jsonify({"error": "Telegram publishing is available only for PornHub video downloads"}), 400
+    # Telegram needs the server-side file as its upload source.  Do not also
+    # redirect the browser to download the completed video.
+    if publish_to_telegram:
+        server_only = True
 
     log_event("HTTP", f"Parsed start payload url_present={bool(url)} file_present={bool(file)} quality={quality} download_type={download_type} structured={structured} model_size={model_size} server_only={server_only} publish_to_telegram={publish_to_telegram}")
     if not url and not file:

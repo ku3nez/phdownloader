@@ -113,6 +113,8 @@ This uses a Telegram **user account** through MTProto rather than a bot, so vide
 
 The web control is intentionally absent from normal use. Open the application with `#telegram` in the URL, paste a PornHub URL, select video, then enable **Send to Telegram**. A confirmation is shown before the task is created. The backend rejects Telegram publication for any non-PornHub-video request.
 
+Telegram publication always retains the temporary source file on the server while it is uploaded; the browser is not redirected to download that video locally.
+
 Authorize the account once on the publishing node, then discover the target ID:
 
 ```bash
