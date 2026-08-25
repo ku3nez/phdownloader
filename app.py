@@ -19,6 +19,7 @@ from cluster_config import (
     RQ_PORNHUB_QUEUE_NAME,
     RQ_TRANSCRIPT_QUEUE_NAME,
     SHARED_STORAGE_ROOT,
+    TASK_STALL_TIMEOUT_SECONDS,
     TASKS_ROOT,
 )
 from task_store import TaskStore
@@ -56,6 +57,32 @@ def summarize_headers() -> str:
 
 def task_dir(task_id: str) -> str:
     return os.path.join(TASKS_ROOT, task_id)
+
+
+def remove_active_marker(task_id: str) -> None:
+    """Allow terminal tasks to expire from the shared task directory."""
+    try:
+        os.remove(os.path.join(task_dir(task_id), ".active"))
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log_event("cleanup", f"failed to remove active marker task_id={task_id}: {exc}")
+
+
+def mark_stalled_task_failed(task_id: str, task: dict, now: float) -> None:
+    updated_at = int(task.get("updated_at", 0) or 0)
+    stalled_for = max(0, int(now) - updated_at)
+    error = f"Task stopped updating for {stalled_for}s (watchdog timeout: {TASK_STALL_TIMEOUT_SECONDS}s)"
+    store.set_status(task_id, "failed", error=error, current_status="Task failed: worker stopped reporting progress.")
+    store.append_log(task_id, f"[{task_id}] {error}; marked failed by watchdog")
+    remove_active_marker(task_id)
+    # Retain the error response for the normal expiration period instead of
+    # deleting the task directory in the same cleanup pass.
+    try:
+        os.utime(task_dir(task_id), None)
+    except OSError as exc:
+        log_event("cleanup", f"failed to refresh stalled task directory task_id={task_id}: {exc}")
+    log_event("watchdog", f"marked stalled task failed task_id={task_id} stalled_for={stalled_for}s")
 
 
 def reconcile_distributed_task(task_id: str) -> dict | None:
@@ -141,8 +168,14 @@ def cleanup_downloads() -> None:
                 try:
                     task = store.get_task(item)
                     if task and task.get("status") in {"queued", "processing"}:
+                        updated_at = int(task.get("updated_at", 0) or 0)
+                        if now - updated_at > TASK_STALL_TIMEOUT_SECONDS:
+                            mark_stalled_task_failed(item, task, now)
+                            continue
                         log_event("cleanup", f"skip active task_id={item} status={task.get('status')}")
                         continue
+                    if task and task.get("status") == "cancelled":
+                        remove_active_marker(item)
                     if os.path.isdir(item_path) and os.path.exists(os.path.join(item_path, ".active")):
                         log_event("cleanup", f"skip task_id={item} because .active exists")
                         continue
@@ -318,6 +351,7 @@ def get_progress(task_id: str):
 @app.route("/cancel/<task_id>", methods=["POST"])
 def cancel_task(task_id: str):
     if store.cancel_task(task_id):
+        remove_active_marker(task_id)
         store.append_log(task_id, f"[{task_id}] Task cancelled via HTTP")
         return jsonify({"success": True})
     log_event("HTTP", f"POST /cancel/{task_id} -> 404 task not found")
