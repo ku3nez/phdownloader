@@ -4,6 +4,7 @@ import shutil
 import threading
 import time
 import uuid
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, send_file
@@ -57,6 +58,17 @@ def summarize_headers() -> str:
 
 def task_dir(task_id: str) -> str:
     return os.path.join(TASKS_ROOT, task_id)
+
+
+def is_pornhub_url(url: str | None) -> bool:
+    """Accept PornHub's supported primary domains and their subdomains only."""
+    if not url:
+        return False
+    try:
+        hostname = (urlparse(url).hostname or "").lower().rstrip(".")
+    except (TypeError, ValueError):
+        return False
+    return hostname in {"pornhub.com", "pornhub.org"} or hostname.endswith((".pornhub.com", ".pornhub.org"))
 
 
 def remove_active_marker(task_id: str) -> None:
@@ -260,7 +272,7 @@ def start_download():
         publish_to_telegram = request.form.get("publish_to_telegram", "false").lower() == "true"
 
     publish_to_telegram = bool(publish_to_telegram)
-    is_pornhub_video = bool(url) and "pornhub.com" in url.lower() and download_type == "video"
+    is_pornhub_video = is_pornhub_url(url) and download_type == "video"
     if publish_to_telegram and not is_pornhub_video:
         return jsonify({"error": "Telegram publishing is available only for PornHub video downloads"}), 400
     # Telegram needs the server-side file as its upload source.  Do not also
@@ -315,7 +327,7 @@ def start_download():
     else:
         if download_type == "transcript":
             queue_name = RQ_TRANSCRIPT_QUEUE_NAME
-        elif "pornhub.com" in url.lower():
+        elif is_pornhub_url(url):
             queue_name = RQ_PORNHUB_QUEUE_NAME
         else:
             queue_name = RQ_DEFAULT_QUEUE_NAME

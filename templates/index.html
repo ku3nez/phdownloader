@@ -416,7 +416,12 @@
             const url = document.getElementById('urlInput')?.value || '';
             const format = document.querySelector('input[name="format"]:checked')?.value;
             try {
-                return inputSource === 'url' && format === 'video' && new URL(url).hostname.toLowerCase().endsWith('pornhub.com');
+                const hostname = new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+                const isPornHubHost = hostname === 'pornhub.com'
+                    || hostname === 'pornhub.org'
+                    || hostname.endsWith('.pornhub.com')
+                    || hostname.endsWith('.pornhub.org');
+                return inputSource === 'url' && format === 'video' && isPornHubHost;
             } catch (_) {
                 return false;
             }
