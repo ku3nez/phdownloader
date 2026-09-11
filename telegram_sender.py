@@ -6,6 +6,7 @@ the node consuming the dedicated Telegram RQ queue needs these settings.
 
 import asyncio
 import json
+import math
 import os
 import re
 import subprocess
@@ -69,6 +70,56 @@ def get_video_metadata(file_path: str) -> tuple[float, int, int]:
         return 1.0, 1, 1
 
 
+def score_video_frame(file_path: str, seek_seconds: float) -> float | None:
+    """Score a frame by usable exposure and contrast without extra libraries."""
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-ss",
+                f"{seek_seconds:.3f}",
+                "-i",
+                file_path,
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=160:-2,format=gray",
+                "-f",
+                "rawvideo",
+                "-",
+            ],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        pixels = result.stdout
+        if result.returncode != 0 or not pixels:
+            return None
+        pixel_count = len(pixels)
+        average = sum(pixels) / pixel_count
+        variance = max(0.0, (sum(value * value for value in pixels) / pixel_count) - (average * average))
+        contrast = math.sqrt(variance)
+        # Dark intros, white slates and flat frames receive a strong penalty.
+        exposure = min(average, 255.0 - average) / 127.5
+        return contrast * max(0.0, exposure)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def choose_thumbnail_seek(file_path: str, duration: float) -> float:
+    """Pick the most informative central frame, excluding intros and endings."""
+    if duration <= 0:
+        return 3.0
+    candidates = [duration * position for position in (0.30, 0.40, 0.50, 0.60)]
+    scored_candidates = [(score_video_frame(file_path, seek), seek) for seek in candidates]
+    valid_candidates = [(score, seek) for score, seek in scored_candidates if score is not None]
+    if valid_candidates:
+        return max(valid_candidates, key=lambda item: item[0])[1]
+    return duration * 0.40
+
+
 def build_video_thumbnail(file_path: str, seek_seconds: float) -> str | None:
     """Create a compact JPEG thumbnail required for Telegram's video tile."""
     fd, thumbnail_path = tempfile.mkstemp(prefix="telegram-thumb-", suffix=".jpg", dir=os.path.dirname(file_path))
@@ -120,9 +171,7 @@ async def _publish_video_async(file_path: str) -> int:
     if session_parent:
         os.makedirs(session_parent, exist_ok=True)
     duration, width, height = get_video_metadata(file_path)
-    # The first seconds often contain a black intro. A frame around 10% into
-    # the video gives a useful preview while keeping the seek bounded.
-    thumbnail_path = build_video_thumbnail(file_path, min(max(duration * 0.1, 3.0), 30.0))
+    thumbnail_path = build_video_thumbnail(file_path, choose_thumbnail_seek(file_path, duration))
     client = TelegramClient(session_path, api_id, api_hash)
     await client.connect()
     try:
