@@ -101,9 +101,31 @@ def score_video_frame(file_path: str, seek_seconds: float) -> float | None:
         average = sum(pixels) / pixel_count
         variance = max(0.0, (sum(value * value for value in pixels) / pixel_count) - (average * average))
         contrast = math.sqrt(variance)
+        width = 160
+        height = pixel_count // width
+        if height < 3 or height * width != pixel_count:
+            return None
+        # A focused frame contains stronger high-frequency edges than one in
+        # defocus or motion blur. Use the mean absolute Laplacian so no extra
+        # image-processing dependency is needed.
+        laplacian_sum = 0
+        laplacian_count = 0
+        for row in range(1, height - 1):
+            row_offset = row * width
+            for column in range(1, width - 1):
+                index = row_offset + column
+                laplacian_sum += abs(
+                    (4 * pixels[index])
+                    - pixels[index - 1]
+                    - pixels[index + 1]
+                    - pixels[index - width]
+                    - pixels[index + width]
+                )
+                laplacian_count += 1
+        sharpness = laplacian_sum / laplacian_count if laplacian_count else 0.0
         # Dark intros, white slates and flat frames receive a strong penalty.
         exposure = min(average, 255.0 - average) / 127.5
-        return contrast * max(0.0, exposure)
+        return sharpness * (0.5 + (contrast / 255.0)) * max(0.0, exposure)
     except (OSError, subprocess.TimeoutExpired):
         return None
 
