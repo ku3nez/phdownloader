@@ -106,7 +106,13 @@ def reconcile_distributed_task(task_id: str) -> dict | None:
         chunk_status = chunk.get("status")
         if chunk_status not in {"queued", "processing"}:
             continue
-        rq_status = store.get_job_status(chunk.get("rq_job_id"))
+        job_id = chunk.get("rq_job_id")
+        # Chunks are saved before their jobs are enqueued. A progress request
+        # can observe that brief interval on another API node, so a missing ID
+        # means "still being queued", not "job disappeared".
+        if not job_id:
+            continue
+        rq_status = store.get_job_status(job_id)
         if rq_status in {"failed", "stopped", "canceled"}:
             store.update_chunk(
                 task_id,
