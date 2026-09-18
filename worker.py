@@ -434,6 +434,33 @@ def process_uploaded_transcription(task_id: str, file_path: str, structured: boo
         remove_active_marker(active_marker)
 
 
+def process_uploaded_video(task_id: str, file_path: str, server_only: bool = True) -> None:
+    """Publish a browser-uploaded video to Telegram without re-encoding it."""
+    store.set_status(task_id, "processing", worker_node=NODE_NAME)
+    task_dir = os.path.dirname(file_path)
+    active_marker = ensure_active_marker(task_dir)
+    log_event(task_id, f"process_uploaded_video worker_node={NODE_NAME} file_path={file_path}")
+    try:
+        if not os.path.isfile(file_path):
+            raise RuntimeError("Uploaded video file is missing")
+        store.set_status(
+            task_id,
+            "completed",
+            filename=file_path,
+            progress=100,
+            server_only=server_only,
+            error=None,
+            current_status="Video uploaded. Sending to Telegram...",
+        )
+        enqueue_telegram_publication(task_id, file_path)
+        log_event(task_id, f"uploaded video ready for Telegram publication filename={file_path}")
+    except Exception as exc:
+        store.set_status(task_id, "failed", error=str(exc))
+        log_event(task_id, f"uploaded video failed: {exc}")
+        log_event(task_id, traceback.format_exc())
+        remove_active_marker(active_marker)
+
+
 def process_transcription_chunk(task_id: str, chunk_id: str) -> None:
     chunk = store.get_chunk(task_id, chunk_id)
     if not chunk:

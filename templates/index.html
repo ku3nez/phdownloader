@@ -427,12 +427,23 @@
             }
         }
 
+        function isTelegramModeEnabled() {
+            return window.location.hash === '#telegram';
+        }
+
+        function isLocalTelegramVideoRequest() {
+            const format = document.querySelector('input[name="format"]:checked')?.value;
+            return isTelegramModeEnabled() && inputSource === 'file' && format === 'video';
+        }
+
         function updateTelegramPublishVisibility() {
             const option = document.getElementById('telegramPublishOption');
             const checkbox = document.getElementById('telegramPublishCheckbox');
             if (!option || !checkbox) return;
-            const enabled = window.location.hash === '#telegram' && isPornHubVideoRequest();
+            const enabled = isTelegramModeEnabled() && (isPornHubVideoRequest() || isLocalTelegramVideoRequest());
+            const wasHidden = option.style.display === 'none';
             option.style.display = enabled ? 'flex' : 'none';
+            if (enabled && wasHidden) checkbox.checked = true;
             if (!enabled) checkbox.checked = false;
         }
 
@@ -533,7 +544,9 @@
             const format = formatRadio.value;
             const btn = document.getElementById('downloadBtn');
             
-            if (format === 'transcript') {
+            if (isLocalTelegramVideoRequest()) {
+                btn.textContent = isRussian ? 'Отправить видео в Telegram' : 'Send Video to Telegram';
+            } else if (format === 'transcript') {
                 if (inputSource === 'file') {
                     btn.textContent = isRussian ? 'Распознать файл' : 'Transcribe File';
                 } else {
@@ -665,7 +678,10 @@
             updateTelegramPublishVisibility();
             document.getElementById('urlInput').addEventListener('input', updateTelegramPublishVisibility);
             document.querySelectorAll('input[name="format"]').forEach((input) => input.addEventListener('change', updateTelegramPublishVisibility));
-            window.addEventListener('hashchange', updateTelegramPublishVisibility);
+            window.addEventListener('hashchange', () => {
+                updateStructuredOptionVisibility();
+                updateTelegramPublishVisibility();
+            });
         });
 
         document.addEventListener('DOMContentLoaded', async () => {
@@ -769,7 +785,7 @@
             const logContainer = document.getElementById('log-container');
 
             // Validation
-            if (inputSource === 'file' && format === 'transcript') {
+            if (inputSource === 'file') {
                 const fileInput = document.getElementById('fileInput');
                 if (fileInput.files.length === 0) {
                     alert(isRussian ? "Пожалуйста, выберите файл" : "Please select a file");
@@ -800,7 +816,10 @@
                 const modelSelect = document.getElementById('modelSelect');
                 const modelSize = modelSelect ? modelSelect.value : 'base';
                 const telegramPublishCheckbox = document.getElementById('telegramPublishCheckbox');
-                const publishToTelegram = Boolean(telegramPublishCheckbox?.checked && isPornHubVideoRequest());
+                const publishToTelegram = Boolean(
+                    isLocalTelegramVideoRequest()
+                    || (telegramPublishCheckbox?.checked && isPornHubVideoRequest())
+                );
                 const saveOnServer = Boolean(serverOnlyCheckbox?.checked || publishToTelegram);
                 if (publishToTelegram && !window.confirm(isRussian
                     ? 'После скачивания видео будет отправлено в Telegram. Продолжить?'
@@ -813,7 +832,7 @@
 
                 let taskId;
 
-                if (inputSource === 'file' && format === 'transcript') {
+                if (inputSource === 'file') {
                     const fileInput = document.getElementById('fileInput');
                     const formData = new FormData();
                     formData.append('file', fileInput.files[0]);
@@ -821,6 +840,7 @@
                     formData.append('structured', structured);
                     formData.append('model_size', modelSize);
                     formData.append('server_only', saveOnServer);
+                    formData.append('publish_to_telegram', publishToTelegram);
 
                     const data = await uploadAndStartTask(formData);
                     taskId = data.task_id;
@@ -918,9 +938,20 @@
                             message.textContent = `${baseMsg} ${etaText}`;
                         }
                     } else if (data.status === 'completed') {
+                        if (data.publish_to_telegram && data.telegram_status !== 'completed' && data.telegram_status !== 'failed' && data.telegram_status !== 'cancelled') {
+                            message.textContent = isRussian ? 'Отправка в Telegram...' : 'Sending to Telegram...';
+                            return;
+                        }
                         clearInterval(interval);
                         progressBar.style.width = '100%';
-                        message.textContent = data.server_only ? (isRussian ? 'Готово! Файл сохранен на сервере.' : 'Done! File saved on server.') : 'Download complete! Saving file...';
+                        if (data.telegram_status === 'failed') {
+                            progressBar.style.backgroundColor = 'red';
+                            message.textContent = data.telegram_error || (isRussian ? 'Не удалось отправить в Telegram' : 'Telegram delivery failed');
+                        } else if (data.publish_to_telegram) {
+                            message.textContent = isRussian ? 'Видео отправлено в Telegram.' : 'Video sent to Telegram.';
+                        } else {
+                            message.textContent = data.server_only ? (isRussian ? 'Готово! Файл сохранен на сервере.' : 'Done! File saved on server.') : 'Download complete! Saving file...';
+                        }
                         if (!isRedirecting && !data.server_only) {
                             isRedirecting = true;
                             window.location.href = `/get_file/${taskId}`;
@@ -959,8 +990,12 @@
                 structuredOption.style.display = 'none';
             }
             
+            const allowLocalTelegramVideo = radio && radio.value === 'video' && isTelegramModeEnabled();
             if (radio && radio.value === 'transcript') {
                 aiOptions.style.display = 'block';
+                inputTabs.style.display = 'flex';
+            } else if (allowLocalTelegramVideo) {
+                aiOptions.style.display = 'none';
                 inputTabs.style.display = 'flex';
             } else {
                 aiOptions.style.display = 'none';
@@ -971,6 +1006,7 @@
             // Always update quality options when format changes
             updateQualityOptions();
             updateButtonText();
+            updateTelegramPublishVisibility();
         }
 
         function updateQualityOptions() {

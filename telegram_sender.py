@@ -37,9 +37,13 @@ def _settings() -> tuple[int, str, int, str]:
 
 
 def caption_for_file(file_path: str) -> str:
-    """Use the downloaded title, without the file extension, as the caption."""
+    """Turn downloader-style filenames into a readable Telegram caption."""
     title = re.sub(r"^\[SERVER\]\s*", "", Path(file_path).stem, flags=re.IGNORECASE)
-    return re.sub(r"_(?:360|480|720|1080)p?$|_best$", "", title, flags=re.IGNORECASE)
+    # Site prefixes and quality tokens are useful in a filename but make a
+    # poor message title.  Keep the actual human-entered words untouched.
+    title = re.sub(r"^(?:pornhubfans?|phdownloader)[_\s-]+", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"(?:^|_)(?:360|480|720|1080|1440|2160)p?(?=_|$)|(?:^|_)best(?=_|$)", "_", title, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", title)).strip()
 
 
 def get_video_metadata(file_path: str) -> tuple[float, int, int]:

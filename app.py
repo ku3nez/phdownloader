@@ -18,6 +18,7 @@ from cluster_config import (
     FILE_EXPIRATION_SECONDS,
     RQ_DEFAULT_QUEUE_NAME,
     RQ_PORNHUB_QUEUE_NAME,
+    RQ_TELEGRAM_QUEUE_NAME,
     RQ_TRANSCRIPT_QUEUE_NAME,
     SHARED_STORAGE_ROOT,
     TASK_STALL_TIMEOUT_SECONDS,
@@ -246,6 +247,13 @@ def normalize_uploaded_filename(file) -> str:
     return orig_filename
 
 
+def is_uploaded_video_file(file) -> bool:
+    if not file:
+        return False
+    extension = os.path.splitext(secure_filename(file.filename or ""))[1].lower()
+    return bool(file.content_type and file.content_type.startswith("video/")) or extension in {".mp4", ".mov", ".mkv", ".avi", ".webm"}
+
+
 @app.route("/")
 def index():
     return render_template(
@@ -279,8 +287,9 @@ def start_download():
 
     publish_to_telegram = bool(publish_to_telegram)
     is_pornhub_video = is_pornhub_url(url) and download_type == "video"
-    if publish_to_telegram and not is_pornhub_video:
-        return jsonify({"error": "Telegram publishing is available only for PornHub video downloads"}), 400
+    is_uploaded_video = is_uploaded_video_file(file) and download_type == "video"
+    if publish_to_telegram and not (is_pornhub_video or is_uploaded_video):
+        return jsonify({"error": "Telegram publishing is available only for PornHub or uploaded video files"}), 400
     # Telegram needs the server-side file as its upload source.  Do not also
     # redirect the browser to download the completed video.
     if publish_to_telegram:
@@ -289,6 +298,8 @@ def start_download():
     log_event("HTTP", f"Parsed start payload url_present={bool(url)} file_present={bool(file)} quality={quality} download_type={download_type} structured={structured} model_size={model_size} server_only={server_only} publish_to_telegram={publish_to_telegram}")
     if not url and not file:
         return jsonify({"error": "URL or File is required"}), 400
+    if file and download_type != "transcript" and not publish_to_telegram:
+        return jsonify({"error": "Uploaded files are supported only for transcription or Telegram video publishing"}), 400
 
     task_id = str(uuid.uuid4())
     os.makedirs(task_dir(task_id), exist_ok=True)
@@ -321,15 +332,24 @@ def start_download():
         file.save(file_path)
         saved_size = os.path.getsize(file_path) if os.path.exists(file_path) else -1
         store.append_log(task_id, f"[{task_id}] Uploaded file saved path={file_path} size={saved_size} bytes")
-        job = store.enqueue(
-            "worker.process_uploaded_transcription",
-            task_id,
-            file_path,
-            queue_name=RQ_TRANSCRIPT_QUEUE_NAME,
-            structured=structured,
-            model_size=model_size,
-            server_only=server_only,
-        )
+        if publish_to_telegram:
+            job = store.enqueue(
+                "worker.process_uploaded_video",
+                task_id,
+                file_path,
+                queue_name=RQ_TELEGRAM_QUEUE_NAME,
+                server_only=True,
+            )
+        else:
+            job = store.enqueue(
+                "worker.process_uploaded_transcription",
+                task_id,
+                file_path,
+                queue_name=RQ_TRANSCRIPT_QUEUE_NAME,
+                structured=structured,
+                model_size=model_size,
+                server_only=server_only,
+            )
     else:
         if download_type == "transcript":
             queue_name = RQ_TRANSCRIPT_QUEUE_NAME
