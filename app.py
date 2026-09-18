@@ -3,12 +3,12 @@ import os
 import shutil
 import threading
 import time
+import unicodedata
 import uuid
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, send_file
-from werkzeug.utils import secure_filename
 
 from cluster_config import (
     APP_PORT,
@@ -219,7 +219,13 @@ cleanup_thread.start()
 
 
 def normalize_uploaded_filename(file) -> str:
-    orig_filename = secure_filename(file.filename or "")
+    # Werkzeug's secure_filename transliterates non-ASCII characters to
+    # underscores.  The filename is later used as the Telegram caption, so
+    # preserve Unicode while rejecting path separators and control characters.
+    orig_filename = os.path.basename((file.filename or "").replace("\\", "/"))
+    orig_filename = unicodedata.normalize("NFKC", orig_filename)
+    orig_filename = "".join("_" if ord(char) < 32 or char in '<>:"/\\|?*' else char for char in orig_filename)
+    orig_filename = orig_filename.strip(". ")
     if not orig_filename:
         orig_filename = "uploaded_file"
     _, ext = os.path.splitext(orig_filename)
@@ -250,7 +256,7 @@ def normalize_uploaded_filename(file) -> str:
 def is_uploaded_video_file(file) -> bool:
     if not file:
         return False
-    extension = os.path.splitext(secure_filename(file.filename or ""))[1].lower()
+    extension = os.path.splitext(file.filename or "")[1].lower()
     return bool(file.content_type and file.content_type.startswith("video/")) or extension in {".mp4", ".mov", ".mkv", ".avi", ".webm"}
 
 
