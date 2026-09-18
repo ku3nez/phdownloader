@@ -41,6 +41,12 @@ def caption_for_file(file_path: str) -> str:
     title = re.sub(r"^\[SERVER\]\s*", "", Path(file_path).stem, flags=re.IGNORECASE)
     # Site prefixes and quality tokens are useful in a filename but make a
     # poor message title.  Keep the actual human-entered words untouched.
+    title = re.sub(
+        r"^\s*\[\s*(?:pornhubfans?|phdownloader)(?:[\s_-]+(?:360|480|720|1080|1440|2160)p?|[\s_-]+best)?\s*\][\s_-]*",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
     title = re.sub(r"^(?:pornhubfans?|phdownloader)[_\s-]+", "", title, flags=re.IGNORECASE)
     title = re.sub(r"(?:^|_)(?:360|480|720|1080|1440|2160)p?(?=_|$)|(?:^|_)best(?=_|$)", "_", title, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", title)).strip()
