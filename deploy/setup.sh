@@ -10,15 +10,25 @@ fi
 
 PROJECT_DIR="/opt/phdownloader"
 VENV_DIR="$PROJECT_DIR/venv"
-PYTHON_BIN="${PYTHON_BIN:-python3.11}"
+PYTHON_BIN="${PYTHON_BIN:-}"
 
 require_python_311() {
   "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'
 }
 
 echo "=== 1. Installing System Dependencies ==="
-apt-get update
-apt-get install -y python3.11 python3.11-venv ffmpeg fail2ban curl aria2 nodejs
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y python3.11 python3.11-venv ffmpeg fail2ban curl aria2 nodejs
+  : "${PYTHON_BIN:=python3.11}"
+elif command -v dnf >/dev/null 2>&1; then
+  # AlmaLinux/RHEL 10 ships Python 3.12.  ffmpeg-free is provided by EPEL.
+  : "${PYTHON_BIN:=python3}"
+  dnf install -y python3 python3-pip ffmpeg-free fail2ban curl aria2 nodejs git fuse-sshfs
+else
+  echo "Error: neither apt-get nor dnf is available."
+  exit 1
+fi
 
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "Error: $PYTHON_BIN is not installed. Install Python 3.11 or set PYTHON_BIN to a Python 3.11+ executable."
