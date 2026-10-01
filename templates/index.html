@@ -5,320 +5,559 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Downloader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;800&display=swap" rel="stylesheet">
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: radial-gradient(circle at top right, #2c1a1a, #121212 40%),
-                radial-gradient(circle at bottom left, #1a1c2c, #121212 40%);
-            background-color: #121212;
-            color: #ffffff;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            overflow-y: auto;
+        :root {
+            --bg: #0f0f0f;
+            --surface: #181818;
+            --raised: #222222;
+            --line: #303030;
+            --text: #f1f1f1;
+            --muted: #9b9b9b;
+            --orange: #ff9900;
+            --orange-soft: rgba(255, 153, 0, 0.14);
+            --red: #ff0033;
+            --green: #3ecf7a;
+            --radius: 12px;
         }
 
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+
+        /* The glows live on a fixed layer, so they never tile or cut off when
+           the card grows taller than the viewport. */
+        html {
+            background-color: var(--bg);
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background:
+                radial-gradient(60vmax 60vmax at 0% 0%, rgba(255, 0, 51, 0.16), transparent 60%),
+                radial-gradient(60vmax 60vmax at 100% 100%, rgba(255, 153, 0, 0.13), transparent 60%);
+            pointer-events: none;
+        }
+
+        body {
+            font-family: 'Onest', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            color: var(--text);
+            margin: 0;
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            padding: 24px 16px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* margin:auto centres a short card and lets a tall one start at the top
+           and scroll, instead of overflowing above the viewport. */
         .container {
-            text-align: center;
-            background-color: rgba(30, 30, 30, 0.8);
-            backdrop-filter: blur(10px);
-            padding: 50px 30px;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
-            width: 90%;
-            max-width: 550px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            margin: 20px;
+            margin: auto;
+            width: 100%;
+            max-width: 560px;
+            background-color: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 24px;
+            padding: 40px 32px 32px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
         }
 
         h1 {
-            margin-bottom: 40px;
-            font-size: 2.8rem;
+            margin: 0 0 32px;
+            font-size: 2.6rem;
             font-weight: 800;
+            letter-spacing: -0.03em;
+            line-height: 1.1;
             display: flex;
             align-items: center;
             justify-content: center;
             flex-wrap: wrap;
-            gap: 12px;
+            gap: 10px;
             cursor: default;
-        }
-
-        @media (max-width: 600px) {
-            h1 {
-                font-size: 1.8rem;
-                gap: 8px;
-            }
-
-            .container {
-                padding: 30px 20px;
-                margin: 10px;
-            }
-
-            .yt-icon {
-                width: 36px;
-                height: 26px;
-                margin-right: 5px;
-            }
-
-            .yt-icon::after {
-                border-top-width: 4px;
-                border-bottom-width: 4px;
-                border-left-width: 7px;
-            }
-
-            button {
-                width: 100%;
-                padding: 14px 20px;
-                font-size: 16px;
-            }
-
-            input[type="text"] {
-                width: 100%;
-                box-sizing: border-box;
-            }
         }
 
         .yt-part {
             display: flex;
             align-items: center;
-            color: #fff;
         }
 
         .yt-icon {
-            background-color: #ff0000;
-            width: 44px;
-            height: 32px;
-            border-radius: 9px;
+            background-color: var(--red);
+            width: 50px;
+            height: 35px;
+            border-radius: 10px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             margin-right: 10px;
-            box-shadow: 0 4px 10px rgba(255, 0, 0, 0.3);
-            position: relative;
         }
 
         .yt-icon::after {
             content: '';
-            width: 0;
-            height: 0;
-            border-top: 6px solid transparent;
-            border-bottom: 6px solid transparent;
-            border-left: 10px solid white;
+            border-top: 7px solid transparent;
+            border-bottom: 7px solid transparent;
+            border-left: 12px solid #fff;
             margin-left: 3px;
         }
 
-        .ph-part {
-            color: #fff;
-        }
-
         .ph-accent {
-            background-color: rgba(255, 153, 0, 0.85);
-            /* Slightly transparent and softer */
+            background-color: var(--orange);
             color: #000;
-            padding: 0 8px;
-            border-radius: 5px;
-            margin-left: 2px;
-            font-weight: 700;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            padding: 0 8px 2px;
+            border-radius: 7px;
+            margin-left: 3px;
         }
 
+        /* ---- inputs ---- */
         input[type="text"] {
-            width: 85%;
-            padding: 15px;
-            margin-bottom: 25px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            background-color: rgba(0, 0, 0, 0.2);
-            color: #fff;
+            width: 100%;
+            height: 54px;
+            padding: 0 18px;
+            margin-bottom: 16px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background-color: var(--bg);
+            color: var(--text);
+            font: inherit;
             font-size: 16px;
-            transition: all 0.3s;
             outline: none;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+
+        input[type="text"]::placeholder {
+            color: #6f6f6f;
         }
 
         input[type="text"]:focus {
-            border-color: #ff9900;
-            background-color: rgba(0, 0, 0, 0.3);
-            box-shadow: 0 0 15px rgba(255, 153, 0, 0.1);
+            border-color: var(--orange);
+            box-shadow: 0 0 0 3px var(--orange-soft);
         }
 
-        button {
-            padding: 14px 44px;
-            font-size: 18px;
-            font-weight: 700;
-            background: linear-gradient(135deg, #ffbc47 0%, #ff9900 100%);
-            color: #000;
-            border: none;
-            border-radius: 12px;
+        select {
+            appearance: none;
+            -webkit-appearance: none;
+            font: inherit;
+            font-size: 14px;
+            color: var(--text);
+            background-color: var(--raised);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%239b9b9b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            height: 38px;
+            padding: 0 34px 0 12px;
+            min-width: 0;
+            max-width: 100%;
             cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 5px 20px rgba(255, 153, 0, 0.4);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
 
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(255, 153, 0, 0.5);
-            filter: brightness(1.05);
+        select:hover {
+            border-color: #4a4a4a;
         }
 
-        button:disabled {
-            background-color: #555;
-            cursor: not-allowed;
+        input[type="checkbox"] {
+            accent-color: var(--orange);
+            width: 17px;
+            height: 17px;
+            margin: 0;
+            cursor: pointer;
         }
 
-        #status-area {
-            margin-top: 25px;
-            display: none;
+        :focus-visible {
+            outline: 2px solid var(--orange);
+            outline-offset: 2px;
         }
 
-        .progress-bar-container {
-            width: 100%;
-            background-color: #444;
-            border-radius: 5px;
-            height: 20px;
-            margin-bottom: 10px;
-            overflow: hidden;
-        }
-
-        .progress-bar {
-            height: 100%;
-            background-color: #ff9900;
-            width: 0%;
-            transition: width 0.3s;
-        }
-
-        #details-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-            font-size: 14px;
-            color: #ddd;
-        }
-
-        #message {
-            font-size: 14px;
-            color: #aaa;
-        }
-
-        #log-container {
-            padding: 10px;
-            background-color: #2c2c2c;
-            border-radius: 5px;
-            height: 100px;
-            overflow-y: auto;
+        /* ---- settings rows: label left, control right ---- */
+        .settings {
             text-align: left;
-            font-size: 11px;
-            font-family: 'Consolas', 'Monaco', monospace;
-            color: #888;
-            border: 1px solid #333;
+            margin-bottom: 20px;
         }
 
-        #log-container div {
-            margin-bottom: 2px;
-            line-height: 1.2;
+        .field {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            min-height: 46px;
+            margin-bottom: 6px;
         }
 
-        /* New local file upload and tab styles */
-        .tab-btn {
-            padding: 8px 20px;
+        .field > label,
+        .field-label {
             font-size: 14px;
-            font-weight: 600;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background-color: rgba(0, 0, 0, 0.2);
-            color: #aaa;
-            border-radius: 8px;
+            color: var(--muted);
+            flex-shrink: 0;
+        }
+
+        .hint {
+            font-size: 12.5px;
+            line-height: 1.45;
+            color: var(--muted);
+            margin: 0 0 12px;
+            text-align: left;
+        }
+
+        .check {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 38px;
+            font-size: 14px;
+            color: var(--text);
             cursor: pointer;
-            transition: all 0.3s;
+            text-align: left;
+        }
+
+        .check label {
+            cursor: pointer;
+        }
+
+        /* ---- format tiles (radio inputs stay in the DOM for the script) ---- */
+        .format-block {
+            margin: 4px 0 12px;
+        }
+
+        .format-block > label {
+            display: block;
+            font-size: 14px;
+            color: var(--muted);
+            margin-bottom: 10px;
+            text-align: left;
+        }
+
+        .format-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .format-grid label {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 46px;
+            padding: 6px 10px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--muted);
+            background-color: var(--bg);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+        }
+
+        .format-grid label:hover {
+            color: var(--text);
+            border-color: #4a4a4a;
+        }
+
+        .format-grid input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .format-grid label:has(input:checked) {
+            color: var(--orange);
+            border-color: var(--orange);
+            background-color: var(--orange-soft);
+        }
+
+        .format-grid label:has(input:focus-visible) {
+            outline: 2px solid var(--orange);
+            outline-offset: 2px;
+        }
+
+        /* ---- buttons ---- */
+        button {
+            font: inherit;
+            cursor: pointer;
+        }
+
+        #downloadBtn {
+            width: 100%;
+            min-height: 54px;
+            padding: 12px 20px;
+            font-size: 17px;
+            font-weight: 600;
+            color: #000;
+            background-color: var(--orange);
+            border: none;
+            border-radius: var(--radius);
+            transition: background-color 0.15s, transform 0.1s;
+        }
+
+        #downloadBtn:hover {
+            background-color: #ffad33;
+        }
+
+        #downloadBtn:active {
+            transform: translateY(1px);
+        }
+
+        #downloadBtn:disabled {
+            background-color: #3a3a3a;
+            color: #8a8a8a;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #input-tabs {
+            padding: 4px;
+            margin-bottom: 12px;
+            background-color: var(--bg);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+        }
+
+        .tab-btn {
+            flex: 1;
+            min-height: 36px;
+            padding: 6px 14px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--muted);
+            background: none;
+            border: none;
+            border-radius: 9px;
+            transition: color 0.15s, background-color 0.15s;
+        }
+
+        .tab-btn:hover {
+            color: var(--text);
         }
 
         .tab-btn.active {
-            background: linear-gradient(135deg, #ffbc47 0%, #ff9900 100%);
             color: #000;
-            border-color: transparent;
-            box-shadow: 0 4px 12px rgba(255, 153, 0, 0.3);
+            background-color: var(--orange);
         }
 
+        .ghost-btn {
+            padding: 5px 12px;
+            font-size: 12.5px;
+            color: var(--text);
+            background-color: var(--raised);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+        }
+
+        .ghost-btn:hover {
+            border-color: #4a4a4a;
+        }
+
+        #cancelBtn {
+            display: none;
+            color: #ff6b81;
+            border-color: rgba(255, 0, 51, 0.45);
+            background-color: rgba(255, 0, 51, 0.1);
+        }
+
+        #cancelBtn:hover {
+            background-color: rgba(255, 0, 51, 0.2);
+        }
+
+        /* ---- file drop area ---- */
         .file-upload-drag-area {
-            border: 2px dashed rgba(255, 153, 0, 0.3);
-            border-radius: 12px;
-            padding: 25px;
-            background-color: rgba(0, 0, 0, 0.2);
+            border: 1.5px dashed #4a4a4a;
+            border-radius: var(--radius);
+            padding: 24px 16px;
+            background-color: var(--bg);
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: border-color 0.15s, background-color 0.15s;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            gap: 8px;
-            margin-bottom: 25px;
+            gap: 6px;
+            margin-bottom: 16px;
         }
 
-        .file-upload-drag-area:hover, .file-upload-drag-area.dragover {
-            border-color: #ff9900;
-            background-color: rgba(255, 153, 0, 0.05);
-            box-shadow: 0 0 15px rgba(255, 153, 0, 0.1);
+        .file-upload-drag-area:hover,
+        .file-upload-drag-area.dragover {
+            border-color: var(--orange);
+            background-color: var(--orange-soft);
         }
 
         .upload-icon {
-            font-size: 32px;
+            font-size: 28px;
+            line-height: 1;
         }
 
         .file-upload-drag-area p {
             margin: 0;
             font-size: 14px;
             color: #ddd;
+            overflow-wrap: anywhere;
         }
 
         .file-info-label {
-            font-size: 12px;
-            color: #888;
+            font-size: 12.5px;
+            color: var(--muted);
+        }
+
+        /* ---- progress panel ---- */
+        #status-area {
+            display: none;
+            margin-top: 20px;
+            padding: 18px;
+            background-color: var(--bg);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 10px;
+            background-color: var(--raised);
+            border-radius: 5px;
+            margin-bottom: 10px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: var(--orange);
+            border-radius: 5px;
+            transition: width 0.3s;
+        }
+
+        #details-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+            font-size: 13px;
+            color: var(--muted);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            text-align: left;
+        }
+
+        #currentStatus {
+            font-size: 13.5px;
+            font-weight: 500;
+            color: var(--orange);
+            margin: 0;
+            overflow-wrap: anywhere;
+        }
+
+        #message {
+            font-size: 14px;
+            color: var(--text);
+            margin: 14px 0 0;
+            overflow-wrap: anywhere;
+            white-space: pre-line;
+        }
+
+        details summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 13px;
+            color: var(--muted);
+            cursor: pointer;
+            user-select: none;
+            list-style: none;
+        }
+
+        details summary::-webkit-details-marker {
+            display: none;
+        }
+
+        #logSummary::before {
+            content: '▸';
+            display: inline-block;
+            margin-right: 6px;
+            transition: transform 0.15s;
+        }
+
+        details[open] #logSummary::before {
+            transform: rotate(90deg);
+        }
+
+        #log-container {
+            margin-top: 8px;
+            padding: 10px 12px;
+            background-color: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            height: 132px;
+            overflow-y: auto;
+            text-align: left;
+            font-size: 11.5px;
+            font-family: ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace;
+            color: var(--muted);
+        }
+
+        #log-container div {
+            margin-bottom: 2px;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
         }
 
         /* Per-chunk progress for distributed transcription */
         #chunk-list {
             display: none;
             margin: 4px 0 14px;
+            padding-top: 12px;
+            border-top: 1px solid var(--line);
             text-align: left;
         }
 
         .chunk-head {
             display: flex;
             justify-content: space-between;
-            font-size: 12px;
-            color: #888;
-            margin-bottom: 6px;
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 8px;
         }
 
         .chunk-row {
             display: grid;
-            grid-template-columns: 96px 1fr 128px;
-            gap: 8px;
+            grid-template-columns: 96px 1fr 120px;
+            gap: 10px;
             align-items: center;
-            font-size: 11px;
-            color: #bbb;
-            margin-bottom: 5px;
+            font-size: 12px;
+            color: #c4c4c4;
+            margin-bottom: 6px;
             font-variant-numeric: tabular-nums;
         }
 
         .chunk-label {
-            color: #999;
+            color: var(--muted);
             white-space: nowrap;
         }
 
         .chunk-track {
-            height: 8px;
-            background-color: #444;
-            border-radius: 4px;
+            height: 6px;
+            background-color: var(--raised);
+            border-radius: 3px;
             overflow: hidden;
         }
 
         .chunk-fill {
             height: 100%;
             width: 0%;
-            background-color: #ff9900;
+            background-color: var(--orange);
+            border-radius: 3px;
             transition: width 0.3s;
         }
 
@@ -329,18 +568,59 @@
             text-overflow: ellipsis;
         }
 
-        .chunk-row.queued .chunk-fill { background-color: #666; }
-        .chunk-row.retry .chunk-fill { background-color: #d4a017; }
-        .chunk-row.completed .chunk-fill { background-color: #3cb371; }
-        .chunk-row.failed .chunk-fill { background-color: #d33; }
-        .chunk-row.cancelled .chunk-fill { background-color: #888; }
-        .chunk-row.queued .chunk-meta { color: #777; }
-        .chunk-row.completed .chunk-meta { color: #3cb371; }
-        .chunk-row.failed .chunk-meta { color: #ff6b6b; }
-        .chunk-row.retry .chunk-meta { color: #d4a017; }
+        .chunk-row.queued .chunk-fill { background-color: #5a5a5a; }
+        .chunk-row.retry .chunk-fill { background-color: #e0b02a; }
+        .chunk-row.completed .chunk-fill { background-color: var(--green); }
+        .chunk-row.failed .chunk-fill { background-color: var(--red); }
+        .chunk-row.cancelled .chunk-fill { background-color: #777; }
+        .chunk-row.queued .chunk-meta { color: #7d7d7d; }
+        .chunk-row.completed .chunk-meta { color: var(--green); }
+        .chunk-row.failed .chunk-meta { color: #ff6b81; }
+        .chunk-row.retry .chunk-meta { color: #e0b02a; }
 
-        @media (max-width: 480px) {
-            .chunk-row { grid-template-columns: 76px 1fr 96px; gap: 6px; }
+        @media (max-width: 520px) {
+            body {
+                padding: 12px 10px;
+            }
+
+            .container {
+                padding: 28px 18px 20px;
+                border-radius: 20px;
+            }
+
+            h1 {
+                font-size: 1.9rem;
+                gap: 7px;
+                margin-bottom: 24px;
+            }
+
+            .yt-icon {
+                width: 38px;
+                height: 27px;
+                border-radius: 8px;
+                margin-right: 7px;
+            }
+
+            .yt-icon::after {
+                border-top-width: 5px;
+                border-bottom-width: 5px;
+                border-left-width: 9px;
+            }
+
+            #status-area {
+                padding: 14px;
+            }
+
+            .chunk-row {
+                grid-template-columns: 78px 1fr 92px;
+                gap: 7px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                transition: none !important;
+            }
         }
     </style>
 </head>
@@ -353,7 +633,7 @@
         </h1>
         <div>
             <!-- Source selection tabs for AI Transcript -->
-            <div id="input-tabs" style="display: none; justify-content: center; gap: 10px; margin-bottom: 15px;">
+            <div id="input-tabs" style="display: none; gap: 4px;">
                 <button id="tab-url" type="button" class="tab-btn active" onclick="setInputSource('url')">URL</button>
                 <button id="tab-file" type="button" class="tab-btn" onclick="setInputSource('file')">Local File</button>
             </div>
@@ -372,82 +652,80 @@
                     <input type="file" id="fileInput" accept="audio/*,video/*" style="display: none;" onchange="handleFileSelect(this)">
                 </div>
             </div>
-            <div style="margin-bottom: 20px;">
-                <label for="qualitySelect" style="font-size: 14px; color: #aaa; margin-right: 10px;">Quality:</label>
-                <select id="qualitySelect"
-                    style="padding: 8px; border-radius: 5px; background-color: #2c2c2c; color: #fff; border: 1px solid #333;">
-                    <option value="best" {% if default_quality=='best' %}selected{% endif %}>Best Available</option>
-                    <option value="1080" {% if default_quality=='1080' %}selected{% endif %}>1080p</option>
-                    <option value="720" {% if default_quality=='720' %}selected{% endif %}>720p</option>
-                    <option value="480" {% if default_quality=='480' %}selected{% endif %}>480p</option>
-                    <option value="360" {% if default_quality=='360' %}selected{% endif %}>360p</option>
-                </select>
-            </div>
-            <div id="audio-quality-hint" style="margin-bottom: 20px; display: none; font-size: 12px; color: #888;">
-                Higher bitrate = better sound, larger file.
-            </div>
-            <div style="margin-bottom: 20px;">
-                <label style="font-size: 14px; color: #aaa; margin-right: 10px;">Format:</label>
-                <div style="display: inline-flex; gap: 15px; flex-wrap: wrap; justify-content: center;">
-                    <label style="cursor: pointer; display: flex; align-items: center; font-size: 13px;">
-                        <input type="radio" name="format" value="video" checked
-                            style="margin-right: 4px; cursor: pointer;">
+
+            <div class="format-block">
+                <label>Format:</label>
+                <div class="format-grid">
+                    <label>
+                        <input type="radio" name="format" value="video" checked>
                         Video (MP4)
                     </label>
-                    <label style="cursor: pointer; display: flex; align-items: center; font-size: 13px;">
-                        <input type="radio" name="format" value="audio" style="margin-right: 4px; cursor: pointer;">
+                    <label>
+                        <input type="radio" name="format" value="audio">
                         Audio (MP3)
                     </label>
-                    <label style="cursor: pointer; display: flex; align-items: center; font-size: 13px;">
-                        <input type="radio" name="format" value="subtitles" style="margin-right: 4px; cursor: pointer;">
+                    <label>
+                        <input type="radio" name="format" value="subtitles">
                         Subtitles (TXT)
                     </label>
-                    <label style="cursor: pointer; display: flex; align-items: center; font-size: 13px;">
-                        <input type="radio" name="format" value="transcript" style="margin-right: 4px; cursor: pointer;">
+                    <label>
+                        <input type="radio" name="format" value="transcript">
                         AI Transcript (TXT)
                     </label>
                 </div>
             </div>
-            <div id="ai-options" style="margin-bottom: 20px; display: none;">
-                <div style="margin-bottom: 12px;">
-                    <label for="languageSelect" style="font-size: 14px; color: #aaa; margin-right: 10px;">Language:</label>
-                    <select id="languageSelect" onchange="updateAsrOptions()"
-                        style="padding: 8px; border-radius: 5px; background-color: #2c2c2c; color: #fff; border: 1px solid #333;">
-                        <option value="auto" selected>Auto-detect</option>
-                        <option value="ru">Русский</option>
-                        <option value="be">Беларуская</option>
-                        <option value="en">English</option>
+
+            <div class="settings">
+                <div class="field">
+                    <label for="qualitySelect">Quality:</label>
+                    <select id="qualitySelect">
+                        <option value="best" {% if default_quality=='best' %}selected{% endif %}>Best Available</option>
+                        <option value="1080" {% if default_quality=='1080' %}selected{% endif %}>1080p</option>
+                        <option value="720" {% if default_quality=='720' %}selected{% endif %}>720p</option>
+                        <option value="480" {% if default_quality=='480' %}selected{% endif %}>480p</option>
+                        <option value="360" {% if default_quality=='360' %}selected{% endif %}>360p</option>
                     </select>
                 </div>
-                <div id="whisperModelRow" style="margin-bottom: 8px;">
-                    <label for="modelSelect" style="font-size: 14px; color: #aaa; margin-right: 10px;">Whisper Model:</label>
-                    <select id="modelSelect"
-                        style="padding: 8px; border-radius: 5px; background-color: #2c2c2c; color: #fff; border: 1px solid #333;">
-                        <option value="small" selected>Small (Faster)</option>
-                        <option value="turbo">Turbo (Best quality, slow)</option>
-                    </select>
+                <div id="audio-quality-hint" class="hint" style="display: none;">
+                    Higher bitrate = better sound, larger file.
                 </div>
-                <div id="asrHint" style="font-size: 12px; color: #888;"></div>
-            </div>
-            <div id="structured-option" style="margin-bottom: 20px; display: none;">
-                <label style="cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #aaa;">
-                    <input type="checkbox" id="structuredToggle" checked style="margin-right: 8px; cursor: pointer;">
-                    Structured (timestamps)
-                </label>
-            </div>
-            {% if enable_save_on_server %}
-            <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: center;">
-                <input type="checkbox" id="serverOnlyCheckbox"
-                    style="margin-right: 10px; transform: scale(1.2); cursor: pointer;">
-                <label id="serverOnlyLabel" for="serverOnlyCheckbox"
-                    style="font-size: 14px; color: #aaa; cursor: pointer;">Download to server only</label>
-            </div>
-            {% endif %}
-            <div id="telegramPublishOption" style="margin-bottom: 20px; display: none; align-items: center; justify-content: center;">
-                <input type="checkbox" id="telegramPublishCheckbox" checked
-                    style="margin-right: 10px; transform: scale(1.2); cursor: pointer;">
-                <label id="telegramPublishLabel" for="telegramPublishCheckbox"
-                    style="font-size: 14px; color: #aaa; cursor: pointer;">Send to Telegram</label>
+                <div id="ai-options" style="display: none;">
+                    <div class="field">
+                        <label for="languageSelect">Language:</label>
+                        <select id="languageSelect" onchange="updateAsrOptions()">
+                            <option value="auto" selected>Auto-detect</option>
+                            <option value="ru">Русский</option>
+                            <option value="be">Беларуская</option>
+                            <option value="en">English</option>
+                        </select>
+                    </div>
+                    <div id="whisperModelRow">
+                        <div class="field">
+                            <label for="modelSelect">Whisper Model:</label>
+                            <select id="modelSelect">
+                                <option value="small" selected>Small (Faster)</option>
+                                <option value="turbo">Turbo (Best quality, slow)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="asrHint" class="hint"></div>
+                </div>
+                <div id="structured-option" style="display: none;">
+                    <label class="check">
+                        <input type="checkbox" id="structuredToggle" checked>
+                        Structured (timestamps)
+                    </label>
+                </div>
+                {% if enable_save_on_server %}
+                <div class="check">
+                    <input type="checkbox" id="serverOnlyCheckbox">
+                    <label id="serverOnlyLabel" for="serverOnlyCheckbox">Download to server only</label>
+                </div>
+                {% endif %}
+                <div id="telegramPublishOption" class="check" style="display: none;">
+                    <input type="checkbox" id="telegramPublishCheckbox" checked>
+                    <label id="telegramPublishLabel" for="telegramPublishCheckbox">Send to Telegram</label>
+                </div>
             </div>
             <button id="downloadBtn" onclick="startDownload()">Download Video</button>
         </div>
@@ -461,23 +739,16 @@
                 <span id="sizeLabel">Downloaded: ---</span>
             </div>
             <div id="chunk-list" aria-live="polite"></div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                <p id="currentStatus" style="font-size: 13px; color: #ff9900; margin: 0; font-weight: bold;">Ready</p>
-                <button id="cancelBtn" onclick="cancelDownload()" style="display: none; background: #cc3333; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Cancel</button>
+            <div class="status-row">
+                <p id="currentStatus">Ready</p>
+                <button id="cancelBtn" class="ghost-btn" onclick="cancelDownload()">Cancel</button>
             </div>
-            <details style="text-align: left; margin-top: 15px;">
-                <summary style="font-size: 12px; color: #888; cursor: pointer; user-select: none; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+            <details>
+                <summary>
                     <span id="logSummary">Technical logs</span>
-                    <button
-                        id="copyLogsBtn"
-                        type="button"
-                        onclick="copyTechnicalLogs(event)"
-                        style="background: #2a2a2a; color: #ddd; border: 1px solid #444; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;"
-                    >
-                        Copy logs
-                    </button>
+                    <button id="copyLogsBtn" type="button" class="ghost-btn" onclick="copyTechnicalLogs(event)">Copy logs</button>
                 </summary>
-                <div id="log-container" style="margin-top: 5px;"></div>
+                <div id="log-container"></div>
             </details>
             <p id="message">Initializing...</p>
         </div>
@@ -672,7 +943,7 @@
                 const languageLabel = document.querySelector('label[for="languageSelect"]');
                 if (languageLabel) languageLabel.textContent = 'Язык записи:';
                 const languageSelectRu = document.getElementById('languageSelect');
-                if (languageSelectRu) languageSelectRu.options[0].textContent = 'Определить автоматически';
+                if (languageSelectRu) languageSelectRu.options[0].textContent = 'Автоопределение';
                 
                 const modelSelect = document.getElementById('modelSelect');
                 if (modelSelect) {
@@ -713,7 +984,7 @@
                 const languageLabel = document.querySelector('label[for="languageSelect"]');
                 if (languageLabel) languageLabel.textContent = 'Язык записи:';
                 const languageSelectRu = document.getElementById('languageSelect');
-                if (languageSelectRu) languageSelectRu.options[0].textContent = 'Определить автоматически';
+                if (languageSelectRu) languageSelectRu.options[0].textContent = 'Автоопределение';
                 
                 const modelSelect2 = document.getElementById('modelSelect');
                 if (modelSelect2) {
@@ -1073,7 +1344,11 @@
                     renderChunks(data);
 
                     if (data.current_status) {
-                        document.getElementById('currentStatus').textContent = data.current_status;
+                        // The chunk list already shows the per-part counts.
+                        const distributed = data.status === 'processing' && Array.isArray(data.chunks) && data.chunks.length > 0;
+                        document.getElementById('currentStatus').textContent = distributed
+                            ? (isRussian ? 'Распознавание по частям на нескольких серверах' : 'Transcribing in parts on several servers')
+                            : data.current_status;
                     }
 
                     if (data.status === 'processing') {
