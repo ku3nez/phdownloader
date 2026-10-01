@@ -24,7 +24,7 @@ A web application for downloading media and creating transcripts. Flask accepts 
 - **Audio or video transcription:** accepts a remote media URL or an uploaded media file.
 - **Faster Whisper processing:** supports selectable model sizes, CPU thread configuration, voice-activity detection, timestamps, and structured or continuous-text output.
 - **Distributed mode for long files:** media longer than `TRANSCRIPTION_MIN_DISTRIBUTED_SECONDS` is split into FFmpeg chunks. Each chunk is queued independently and its timestamps are merged into one final transcript.
-- **Progress and ETA:** reports per-download and per-transcription progress; distributed jobs aggregate chunk progress.
+- **Progress and ETA:** reports per-download and per-transcription progress; distributed jobs aggregate chunk progress and the UI shows a progress bar for every audio chunk with its state and worker node.
 
 ### Task execution and storage
 
@@ -90,6 +90,7 @@ Set configuration values in `.env`. Do not commit that file.
 | `RQ_PORNHUB_QUEUE_NAME` | `phdownloader-pornhub` | Dedicated queue for PornHub downloads. Assign it only to workers whose IP is accepted by PornHub. |
 | `RQ_YOUTUBE_QUEUE_NAME` | `phdownloader-youtube` | Dedicated queue for YouTube downloads and YouTube transcripts. Assign it only to workers whose IP YouTube does not bot-check; long transcriptions are still split onto the transcript queue. |
 | `RQ_TELEGRAM_QUEUE_NAME` | `phdownloader-telegram` | Dedicated queue for Telegram publication. Assign it to exactly one node that holds the Telegram account session. |
+| `NODE_DISPLAY_NAME` | hostname | Short node name shown in task logs and in the per-chunk progress bars. |
 | `RQ_WORKER_PROCESSES` | `1` | Worker processes started by the systemd worker unit. |
 | `RQ_WORKER_QUEUES` | `phdownloader-default` | Queues consumed by the systemd worker unit. Include the transcription and PornHub queues only on nodes assigned to those workloads. |
 | `TRANSCRIPTION_DISTRIBUTED_ENABLED` | `true` | Enables splitting long media into distributed transcription chunks. |

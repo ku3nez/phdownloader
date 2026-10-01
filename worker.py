@@ -32,7 +32,8 @@ from task_store import TaskStore
 load_dotenv()
 
 store = TaskStore()
-NODE_NAME = socket.gethostname()
+# Shown in task logs and the per-chunk progress UI.
+NODE_NAME = os.getenv("NODE_DISPLAY_NAME", "").strip() or socket.gethostname()
 TERMINAL_TASK_STATUSES = {"cancelled", "failed", "completed"}
 # The default lives on the shared volume, so every worker writes to one log
 # regardless of the node that processed the download. An explicit environment

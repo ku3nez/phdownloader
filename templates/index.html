@@ -276,6 +276,72 @@
             font-size: 12px;
             color: #888;
         }
+
+        /* Per-chunk progress for distributed transcription */
+        #chunk-list {
+            display: none;
+            margin: 4px 0 14px;
+            text-align: left;
+        }
+
+        .chunk-head {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 6px;
+        }
+
+        .chunk-row {
+            display: grid;
+            grid-template-columns: 96px 1fr 128px;
+            gap: 8px;
+            align-items: center;
+            font-size: 11px;
+            color: #bbb;
+            margin-bottom: 5px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .chunk-label {
+            color: #999;
+            white-space: nowrap;
+        }
+
+        .chunk-track {
+            height: 8px;
+            background-color: #444;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .chunk-fill {
+            height: 100%;
+            width: 0%;
+            background-color: #ff9900;
+            transition: width 0.3s;
+        }
+
+        .chunk-meta {
+            text-align: right;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .chunk-row.queued .chunk-fill { background-color: #666; }
+        .chunk-row.retry .chunk-fill { background-color: #d4a017; }
+        .chunk-row.completed .chunk-fill { background-color: #3cb371; }
+        .chunk-row.failed .chunk-fill { background-color: #d33; }
+        .chunk-row.cancelled .chunk-fill { background-color: #888; }
+        .chunk-row.queued .chunk-meta { color: #777; }
+        .chunk-row.completed .chunk-meta { color: #3cb371; }
+        .chunk-row.failed .chunk-meta { color: #ff6b6b; }
+        .chunk-row.retry .chunk-meta { color: #d4a017; }
+
+        @media (max-width: 480px) {
+            .chunk-row { grid-template-columns: 76px 1fr 96px; gap: 6px; }
+        }
     </style>
 </head>
 
@@ -382,6 +448,7 @@
                 <span id="speedLabel">Speed: ---</span>
                 <span id="sizeLabel">Downloaded: ---</span>
             </div>
+            <div id="chunk-list" aria-live="polite"></div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                 <p id="currentStatus" style="font-size: 13px; color: #ff9900; margin: 0; font-weight: bold;">Ready</p>
                 <button id="cancelBtn" onclick="cancelDownload()" style="display: none; background: #cc3333; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Cancel</button>
@@ -806,6 +873,7 @@
             message.textContent = isRussian ? 'Инициализация...' : 'Initializing...';
             speedLabel.textContent = 'Speed: ---';
             sizeLabel.textContent = 'Downloaded: ---';
+            renderChunks(null);
             logContainer.innerHTML = `<div>${isRussian ? 'Ожидание ответа сервера...' : 'Waiting for server...'}</div>`;
 
             try {
@@ -886,6 +954,81 @@
             }
         }
 
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, ch => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[ch]);
+        }
+
+        function formatClock(seconds) {
+            const total = Math.max(0, Math.round(Number(seconds) || 0));
+            const h = Math.floor(total / 3600);
+            const m = Math.floor((total % 3600) / 60);
+            const s = total % 60;
+            const mm = String(m).padStart(h ? 2 : 2, '0');
+            const ss = String(s).padStart(2, '0');
+            return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+        }
+
+        // One bar per audio chunk of a distributed transcription.
+        function renderChunks(data) {
+            const list = document.getElementById('chunk-list');
+            if (!list) return;
+            const chunks = (data && Array.isArray(data.chunks)) ? data.chunks : [];
+            if (!chunks.length) {
+                list.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
+            const t = isRussian
+                ? { title: 'Части аудио', done: 'готово', working: 'в работе', queued: 'в очереди',
+                    retry: 'повтор', failed: 'ошибка', cancelled: 'отменено' }
+                : { title: 'Audio chunks', done: 'done', working: 'running', queued: 'queued',
+                    retry: 'retrying', failed: 'failed', cancelled: 'cancelled' };
+            let done = 0, working = 0;
+            const rows = chunks.map(chunk => {
+                const duration = Number(chunk.duration) || 0;
+                const offset = Number(chunk.offset) || 0;
+                let progress = Math.min(100, Math.max(0, Number(chunk.progress) || 0));
+                let state = chunk.status || 'queued';
+                if (state === 'queued' && chunk.error) state = 'retry';
+                const node = chunk.worker_node ? escapeHtml(chunk.worker_node) : '';
+                let meta;
+                if (state === 'completed') {
+                    done += 1;
+                    progress = 100;
+                    meta = `✓ ${node || t.done}`;
+                } else if (state === 'processing') {
+                    working += 1;
+                    const position = formatClock(duration * progress / 100);
+                    meta = `${Math.round(progress)}% · ${node}`;
+                    chunk._position = `${position} / ${formatClock(duration)}`;
+                } else if (state === 'failed') {
+                    meta = t.failed;
+                } else if (state === 'cancelled') {
+                    meta = t.cancelled;
+                } else if (state === 'retry') {
+                    meta = t.retry;
+                    progress = 0;
+                } else {
+                    meta = t.queued;
+                    progress = 0;
+                }
+                const tooltip = escapeHtml(
+                    [chunk._position, chunk.worker_node, chunk.error || chunk.last_status].filter(Boolean).join(' · ')
+                );
+                const label = `${formatClock(offset)}–${formatClock(offset + duration)}`;
+                return `<div class="chunk-row ${state}" title="${tooltip}">
+                    <span class="chunk-label">${label}</span>
+                    <div class="chunk-track"><div class="chunk-fill" style="width: ${progress}%"></div></div>
+                    <span class="chunk-meta">${meta}</span>
+                </div>`;
+            });
+            const summary = `${done}/${chunks.length} ${t.done}` + (working ? ` · ${working} ${t.working}` : '');
+            list.innerHTML = `<div class="chunk-head"><span>${t.title}</span><span>${summary}</span></div>${rows.join('')}`;
+            list.style.display = 'block';
+        }
+
         async function pollProgress(taskId) {
             const progressBar = document.getElementById('progressBar');
             const message = document.getElementById('message');
@@ -904,6 +1047,8 @@
                         logContainer.innerHTML = data.logs.map(log => `<div>${log}</div>`).join('');
                         logContainer.scrollTop = logContainer.scrollHeight;
                     }
+
+                    renderChunks(data);
 
                     if (data.current_status) {
                         document.getElementById('currentStatus').textContent = data.current_status;
