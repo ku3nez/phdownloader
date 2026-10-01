@@ -22,7 +22,8 @@ A web application for downloading media and creating transcripts. Flask accepts 
 ### Transcription
 
 - **Audio or video transcription:** accepts a remote media URL or an uploaded media file.
-- **Faster Whisper processing:** supports selectable model sizes, CPU thread configuration, voice-activity detection, timestamps, and structured or continuous-text output.
+- **Language-routed recognition:** Russian is transcribed with GigaAM v3 and English (and Parakeet's other European languages) with NVIDIA Parakeet TDT v3, both on ONNX Runtime and several times faster than Whisper on CPU. Belarusian and all other languages use Faster Whisper (`small` or `turbo`). The language is chosen in the UI or detected once per task.
+- **Common output:** CPU thread configuration, voice-activity detection, timestamps, and structured or continuous-text output for every engine.
 - **Distributed mode for long files:** media longer than `TRANSCRIPTION_MIN_DISTRIBUTED_SECONDS` is split into FFmpeg chunks. Each chunk is queued independently and its timestamps are merged into one final transcript.
 - **Progress and ETA:** reports per-download and per-transcription progress; distributed jobs aggregate chunk progress and the UI shows a progress bar for every audio chunk with its state and worker node.
 
@@ -93,6 +94,12 @@ Set configuration values in `.env`. Do not commit that file.
 | `NODE_DISPLAY_NAME` | hostname | Short node name shown in task logs and in the per-chunk progress bars. |
 | `RQ_WORKER_PROCESSES` | `1` | Worker processes started by the systemd worker unit. |
 | `RQ_WORKER_QUEUES` | `phdownloader-default` | Queues consumed by the systemd worker unit. Include the transcription and PornHub queues only on nodes assigned to those workloads. |
+| `ASR_FAST_ENGINES` | `gigaam,parakeet` | Non-Whisper engines in use. Remove one (or set empty) to send its languages back to Whisper. |
+| `ASR_GIGAAM_MODEL` | `gigaam-v3-e2e-rnnt` | onnx-asr model used for Russian. |
+| `ASR_PARAKEET_MODEL` | `nemo-parakeet-tdt-0.6b-v3` | onnx-asr model used for English and other Parakeet languages. |
+| `ASR_GIGAAM_QUANTIZATION` | unset | Set to `int8` to load quantized GigaAM weights (less memory, similar speed). |
+| `ASR_PARAKEET_QUANTIZATION` | `int8` | Parakeet weights; full precision (empty value) needs about 2.4 GB of RAM per process. |
+| `WHISPER_CPU_THREADS` | `2` | CPU threads per recognition process, for every engine. |
 | `TRANSCRIPTION_DISTRIBUTED_ENABLED` | `true` | Enables splitting long media into distributed transcription chunks. |
 | `TRANSCRIPTION_MIN_DISTRIBUTED_SECONDS` | `900` | Minimum media duration that activates distributed transcription. |
 | `TRANSCRIPTION_CHUNK_SECONDS` | `600` | Target duration of each FFmpeg audio chunk. |

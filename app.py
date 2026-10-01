@@ -25,6 +25,7 @@ from cluster_config import (
     TASK_STALL_TIMEOUT_SECONDS,
     TASKS_ROOT,
 )
+from asr_routing import FAST_ENGINES, normalize_language, normalize_whisper_model
 from media_urls import is_pornhub_url, is_youtube_url
 from task_store import RQ_WAITING_STATUSES, TaskStore
 
@@ -184,13 +185,14 @@ def calculate_eta(task: dict | None) -> int | None:
     progress = float(task.get("progress", 0) or 0)
     if total_duration <= 0 or progress <= 0 or progress >= 100 or task.get("download_type") != "transcript":
         return None
-    model_size = task.get("model_size", "base")
-    if model_size == "small":
+    # Processing seconds per second of audio on one worker, measured on the
+    # cluster's CPUs.
+    if task.get("asr_engine") in FAST_ENGINES:
+        factor = 0.12
+    elif task.get("model_size") == "small":
         factor = 0.6
-    elif model_size == "base":
-        factor = 0.25
     else:
-        factor = 0.1
+        factor = 1.5
     remaining_video_sec = total_duration * (1 - progress / 100.0)
     return max(1, int(remaining_video_sec * factor / 60))
 
@@ -304,7 +306,8 @@ def start_download():
         quality = request.json.get("quality", DEFAULT_VIDEO_QUALITY)
         download_type = request.json.get("download_type", "video")
         structured = request.json.get("structured", True)
-        model_size = request.json.get("model_size", "base")
+        model_size = request.json.get("model_size", "small")
+        language = request.json.get("language", "auto")
         server_only = request.json.get("server_only", False)
         publish_to_telegram = request.json.get("publish_to_telegram", False)
     else:
@@ -313,11 +316,14 @@ def start_download():
         quality = request.form.get("quality", DEFAULT_VIDEO_QUALITY)
         download_type = request.form.get("download_type", "video")
         structured = request.form.get("structured", "true").lower() == "true"
-        model_size = request.form.get("model_size", "base")
+        model_size = request.form.get("model_size", "small")
+        language = request.form.get("language", "auto")
         server_only = request.form.get("server_only", "false").lower() == "true"
         publish_to_telegram = request.form.get("publish_to_telegram", "false").lower() == "true"
 
     publish_to_telegram = bool(publish_to_telegram)
+    model_size = normalize_whisper_model(model_size)
+    language = normalize_language(language)
     is_pornhub_video = is_pornhub_url(url) and download_type == "video"
     is_uploaded_video = is_uploaded_video_file(file) and download_type == "video"
     if publish_to_telegram and not (is_pornhub_video or is_uploaded_video):
@@ -327,7 +333,7 @@ def start_download():
     if publish_to_telegram:
         server_only = True
 
-    log_event("HTTP", f"Parsed start payload url_present={bool(url)} file_present={bool(file)} quality={quality} download_type={download_type} structured={structured} model_size={model_size} server_only={server_only} publish_to_telegram={publish_to_telegram}")
+    log_event("HTTP", f"Parsed start payload url_present={bool(url)} file_present={bool(file)} quality={quality} download_type={download_type} structured={structured} model_size={model_size} language={language} server_only={server_only} publish_to_telegram={publish_to_telegram}")
     if not url and not file:
         return jsonify({"error": "URL or File is required"}), 400
     if file and download_type != "transcript" and not publish_to_telegram:
@@ -348,6 +354,7 @@ def start_download():
         "is_russian": "ru" in request.headers.get("Accept-Language", "").lower(),
         "structured": structured,
         "model_size": model_size,
+        "language": language,
         "download_type": download_type,
         "url": url,
         "worker_node": None,

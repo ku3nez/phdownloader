@@ -26,7 +26,8 @@ from cluster_config import (
     TRANSCRIPTION_DISTRIBUTED_ENABLED,
     TRANSCRIPTION_MIN_DISTRIBUTED_SECONDS,
 )
-from downloader import download_media, get_media_duration, transcribe_with_whisper
+from asr_routing import asr_engine_for_language, normalize_language
+from downloader import detect_language, download_media, get_media_duration, transcribe_with_whisper
 from task_store import TaskStore
 
 load_dotenv()
@@ -108,7 +109,9 @@ def format_timestamp(seconds: float) -> str:
 
 def friendly_status(task: dict, raw_msg: str) -> str:
     is_ru = bool(task.get("is_russian"))
-    if "Initializing Whisper" in raw_msg or "Whisper AI" in raw_msg:
+    if "Detecting language" in raw_msg:
+        return "Определение языка..." if is_ru else "Detecting language..."
+    if "Initializing" in raw_msg or "Whisper AI" in raw_msg:
         return "Инициализация ИИ..." if is_ru else "Initializing AI..."
     if "Transcribing" in raw_msg:
         return "Распознавание текста..." if is_ru else "Transcribing text..."
@@ -340,9 +343,37 @@ def split_audio_into_chunks(task_id: str, source_path: str, total_duration: floa
     return chunks
 
 
+def resolve_task_language(task_id: str, file_path: str) -> str:
+    """Return the task's language, detecting it once per task when it is "auto".
+
+    Detection runs on the whole source before it is split, so every chunk of a
+    distributed job uses the same language and the same engine.
+    """
+    task = store.get_task(task_id) or {}
+    language = normalize_language(task.get("language"))
+    if language == "auto":
+        detected = normalize_language(task.get("detected_language"))
+        if detected == "auto":
+            store.update_task(task_id, current_status=friendly_status(task, "Detecting language"))
+            try:
+                detected, probability, candidates = detect_language(file_path)
+                top = ", ".join(f"{code} {prob:.2f}" for code, prob in candidates)
+                log_event(task_id, f"detected language={detected} probability={probability:.2f} candidates=[{top}]")
+                store.update_task(task_id, detected_language=detected, detected_language_probability=round(probability, 2))
+            except Exception as exc:
+                log_event(task_id, f"language detection failed, Whisper will detect per segment: {exc}")
+                detected = "auto"
+        language = detected
+    engine = asr_engine_for_language(language)
+    store.update_task(task_id, asr_engine=engine, asr_language=language)
+    log_event(task_id, f"asr routing language={language} engine={engine}")
+    return language
+
+
 def run_single_transcription(task_id: str, file_path: str, structured: bool, model_size: str, server_only: bool) -> str:
     duration = get_media_duration(file_path)
     store.update_task(task_id, total_duration=duration, processing_mode="single")
+    language = resolve_task_language(task_id, file_path)
     transcript_path = distributed_output_path(task_id, file_path)
     log_event(task_id, f"single_transcription duration={duration}s transcript_path={transcript_path}")
     transcribe_with_whisper(
@@ -353,6 +384,7 @@ def run_single_transcription(task_id: str, file_path: str, structured: bool, mod
         total_duration=duration,
         progress_callback=lambda info: update_from_callback(task_id, info),
         check_cancel=lambda: check_cancel(task_id),
+        language=language,
     )
     final_path = transcript_path
     if server_only:
@@ -376,6 +408,7 @@ def enqueue_distributed_transcription(task_id: str, file_path: str, structured: 
         server_only=server_only,
     )
     log_event(task_id, f"distributed_transcription duration={total_duration:.2f}s chunk_seconds={TRANSCRIPTION_CHUNK_SECONDS}")
+    resolve_task_language(task_id, file_path)
     chunks = split_audio_into_chunks(task_id, file_path, total_duration)
     store.save_chunks(task_id, chunks)
     store.update_task(task_id, total_chunks=len(chunks))
@@ -454,7 +487,7 @@ def try_finalize_distributed_transcription(task_id: str) -> None:
 
 
 @with_task_heartbeat
-def process_uploaded_transcription(task_id: str, file_path: str, structured: bool = True, model_size: str = "base", server_only: bool = False) -> None:
+def process_uploaded_transcription(task_id: str, file_path: str, structured: bool = True, model_size: str = "small", server_only: bool = False) -> None:
     store.set_status(task_id, "processing", worker_node=NODE_NAME)
     log_event(task_id, f"process_uploaded_transcription worker_node={NODE_NAME} file_path={file_path}")
     task_dir = os.path.dirname(file_path)
@@ -527,12 +560,15 @@ def process_transcription_chunk(task_id: str, chunk_id: str) -> None:
     store.update_chunk(task_id, chunk_id, status="processing", progress=0.0, worker_node=NODE_NAME)
     update_distributed_progress(task_id)
     log_event(task_id, f"process_transcription_chunk chunk_id={chunk_id} worker_node={NODE_NAME} path={chunk.get('path')}")
+    parent_task = store.get_task(task_id) or {}
     try:
         segments = transcribe_with_whisper(
             audio_path=str(chunk["path"]),
             output_path=str(chunk["transcript_path"]),
             structured=False,
-            model_size=str((store.get_task(task_id) or {}).get("model_size", "base")),
+            model_size=str(parent_task.get("model_size", "small")),
+            # Resolved once for the whole task; never re-detected per chunk.
+            language=str(parent_task.get("asr_language") or parent_task.get("language") or "auto"),
             total_duration=float(chunk.get("duration", 0) or 0),
             progress_callback=lambda info: update_chunk_from_callback(task_id, chunk_id, info),
             check_cancel=lambda: check_cancel(task_id),
@@ -596,7 +632,7 @@ def process_transcription_chunk(task_id: str, chunk_id: str) -> None:
 
 
 @with_task_heartbeat
-def process_remote_media(task_id: str, url: str, quality: str = "720", download_type: str = "video", structured: bool = True, model_size: str = "base", server_only: bool = False) -> None:
+def process_remote_media(task_id: str, url: str, quality: str = "720", download_type: str = "video", structured: bool = True, model_size: str = "small", server_only: bool = False) -> None:
     store.set_status(task_id, "processing", worker_node=NODE_NAME)
     task_dir = os.path.join(TASKS_ROOT, task_id)
     os.makedirs(task_dir, exist_ok=True)

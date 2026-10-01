@@ -6,6 +6,7 @@ import time
 from dotenv import load_dotenv
 import builtins
 
+from asr_routing import DEFAULT_WHISPER_MODEL, asr_engine_for_language, normalize_language, normalize_whisper_model
 from media_urls import is_youtube_url, pornhub_domain
 
 def safe_print(*args, **kwargs):
@@ -52,11 +53,80 @@ def get_media_duration(file_path):
         print(f"Error getting duration with ffprobe: {e}")
     return 0.0
 
-def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='base', total_duration=0, progress_callback=None, check_cancel=None, return_segments=False):
-    """Transcribe audio file using Whisper AI with optional formatting."""
-    if progress_callback:
-        progress_callback({'type': 'status', 'msg': "Preparing audio..."})
-        
+ASR_ONNX_MODELS = {
+    'gigaam': os.getenv('ASR_GIGAAM_MODEL', 'gigaam-v3-e2e-rnnt'),
+    'parakeet': os.getenv('ASR_PARAKEET_MODEL', 'nemo-parakeet-tdt-0.6b-v3'),
+}
+# Parakeet's full-precision weights need about 2.4 GB of RAM, so it defaults to
+# int8; GigaAM is small enough to run in full precision.
+ASR_ONNX_QUANTIZATION = {
+    'gigaam': os.getenv('ASR_GIGAAM_QUANTIZATION', '').strip() or None,
+    'parakeet': os.getenv('ASR_PARAKEET_QUANTIZATION', 'int8').strip() or None,
+}
+
+
+def asr_cpu_threads():
+    threads_env = os.getenv('WHISPER_CPU_THREADS')
+    return int(threads_env) if threads_env and threads_env.isdigit() else 2
+
+
+def detect_language(audio_path, max_seconds=300):
+    """Detect the spoken language with Whisper from the start of the media.
+
+    Returns (language, probability, top_candidates).
+    """
+    import subprocess
+    import tempfile
+    from faster_whisper import WhisperModel
+    from faster_whisper.audio import decode_audio
+
+    fd, sample_path = tempfile.mkstemp(prefix='langdetect-', suffix='.wav')
+    os.close(fd)
+    try:
+        subprocess.run(
+            ['ffmpeg', '-y', '-v', 'error', '-i', audio_path, '-t', str(max_seconds), '-vn', '-ac', '1', '-ar', '16000', sample_path],
+            check=True, capture_output=True, timeout=300,
+        )
+        samples = decode_audio(sample_path, sampling_rate=16000)
+    finally:
+        try:
+            os.remove(sample_path)
+        except OSError:
+            pass
+    model = WhisperModel(DEFAULT_WHISPER_MODEL, device='cpu', compute_type='int8', cpu_threads=asr_cpu_threads())
+    language, probability, candidates = model.detect_language(samples, vad_filter=True, language_detection_segments=4)
+    return language, float(probability), [(code, float(prob)) for code, prob in candidates[:3]]
+
+
+def _onnx_asr_segments(engine, audio, cpu_threads):
+    """Yield segments (start, end, text) from GigaAM or Parakeet via ONNX Runtime."""
+    import onnx_asr
+    import onnxruntime as rt
+
+    options = rt.SessionOptions()
+    options.intra_op_num_threads = cpu_threads
+    options.inter_op_num_threads = 1
+    model = onnx_asr.load_model(ASR_ONNX_MODELS[engine], quantization=ASR_ONNX_QUANTIZATION[engine], sess_options=options)
+    vad = onnx_asr.load_vad('silero', sess_options=options)
+    # batch_size=1: padding segments to a common length makes CPU inference
+    # about three times slower than recognising them one by one.
+    return model.with_vad(vad, max_speech_duration_s=25, batch_size=1).recognize(audio, sample_rate=16000)
+
+
+def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='small', total_duration=0, progress_callback=None, check_cancel=None, return_segments=False, language=None):
+    """Transcribe an audio file.
+
+    Russian goes to GigaAM, Parakeet's European languages to Parakeet and
+    everything else (including Belarusian) to Whisper. `language` is an ISO
+    code or "auto"; `model_size` only applies to the Whisper engine.
+    """
+    def status(msg):
+        print(msg)
+        if progress_callback:
+            progress_callback({'type': 'status', 'msg': msg})
+
+    status("Preparing audio...")
+
     from faster_whisper import WhisperModel
     from faster_whisper.audio import decode_audio
     import numpy as np
@@ -64,12 +134,12 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
     import threading
     import queue
     import time
-    
+
     # Configure faster_whisper logger capture to send logs to the client
     fw_logger = logging.getLogger("faster_whisper")
     original_level = fw_logger.level
     fw_logger.setLevel(logging.INFO)
-    
+
     class TaskLogHandler(logging.Handler):
         def __init__(self, callback):
             super().__init__()
@@ -81,57 +151,60 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
                     self.callback({'type': 'status', 'msg': f"[Whisper] {msg}"})
             except:
                 pass
-                
+
     handler = TaskLogHandler(progress_callback)
     handler.setFormatter(logging.Formatter('%(message)s'))
     fw_logger.addHandler(handler)
-    
+
     try:
+        language = normalize_language(language)
+        if language == 'auto':
+            status("Detecting language...")
+            try:
+                language, probability, candidates = detect_language(audio_path)
+                top = ", ".join(f"{code} {prob:.2f}" for code, prob in candidates)
+                status(f"[ASR] Detected language '{language}' with probability {probability:.2f} ({top})")
+            except Exception as e:
+                status(f"[ASR] Language detection failed, Whisper will detect it itself: {e}")
+        engine = asr_engine_for_language(language)
+
         # Load and decode audio to 16000Hz mono float32
         try:
             audio_samples = decode_audio(audio_path, sampling_rate=16000)
-            
+
             # Check peak amplitude and auto-amplify if too quiet
             peak = np.max(np.abs(audio_samples)) if len(audio_samples) > 0 else 0.0
             if 0.0 < peak < 0.15:
                 scale = 0.8 / peak
                 audio_samples = audio_samples * scale
-                msg = f"Auto-amplified quiet audio in-memory by factor of {scale:.2f} (+{20 * np.log10(scale):.1f} dB)"
-                print(msg)
-                if progress_callback:
-                    progress_callback({'type': 'status', 'msg': msg})
+                status(f"Auto-amplified quiet audio in-memory by factor of {scale:.2f} (+{20 * np.log10(scale):.1f} dB)")
         except Exception as e:
-            msg = f"Error preparing audio, falling back to original file path: {e}"
-            print(msg)
-            if progress_callback:
-                progress_callback({'type': 'status', 'msg': msg})
+            status(f"Error preparing audio, falling back to original file path: {e}")
             audio_samples = audio_path
 
         if check_cancel and check_cancel():
-            raise Exception("Transcription cancelled before Whisper init")
-            
-        # Get thread count from environment
-        threads_env = os.getenv('WHISPER_CPU_THREADS')
-        cpu_threads = int(threads_env) if threads_env and threads_env.isdigit() else 2
-        
-        msg = f"Initializing Whisper Model: size={model_size}, threads={cpu_threads}, compute=int8"
-        print(msg)
-        if progress_callback:
-            progress_callback({'type': 'status', 'msg': msg})
-            
-        model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=cpu_threads)
-        
+            raise Exception("Transcription cancelled before model init")
+
+        cpu_threads = asr_cpu_threads()
+        segments = None
+        if engine != 'whisper':
+            try:
+                status(f"Initializing ASR model: engine={engine}, model={ASR_ONNX_MODELS[engine]}, language={language}, threads={cpu_threads}")
+                segments = _onnx_asr_segments(engine, audio_samples, cpu_threads)
+            except Exception as e:
+                status(f"WARNING: {engine} is unavailable ({e}); falling back to Whisper")
+                engine = 'whisper'
+        if engine == 'whisper':
+            whisper_model = normalize_whisper_model(model_size)
+            status(f"Initializing Whisper Model: size={whisper_model}, language={language}, threads={cpu_threads}, compute=int8")
+            model = WhisperModel(whisper_model, device="cpu", compute_type="int8", cpu_threads=cpu_threads)
+            segments, _ = model.transcribe(audio_samples, beam_size=5, vad_filter=True, language=None if language == 'auto' else language)
+
         if check_cancel and check_cancel():
-            raise Exception("Transcription cancelled after Whisper init")
-        
-        msg = "Transcribing audio (Voice Activity Detection enabled)..."
-        print(msg)
-        if progress_callback:
-            progress_callback({'type': 'status', 'msg': msg})
-            
-        segments, _ = model.transcribe(audio_samples, beam_size=5, vad_filter=True)
-        if progress_callback:
-            progress_callback({'type': 'status', 'msg': "[Whisper] Transcription iterator created, waiting for first segment..."})
+            raise Exception("Transcription cancelled after model init")
+
+        status(f"Transcribing audio with {engine} (Voice Activity Detection enabled)...")
+        status("[ASR] Transcription iterator created, waiting for first segment...")
 
         segment_queue = queue.Queue()
         worker_error = []
@@ -148,7 +221,7 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
 
         worker = threading.Thread(target=collect_segments, daemon=True)
         worker.start()
-    
+
         segments_data = []
         with open(output_path, "w", encoding="utf-8") as f:
             first_segment = True
@@ -167,39 +240,38 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
                         elapsed = int(now - wait_started_at)
                         progress_callback({
                             'type': 'status',
-                            'msg': f"[Whisper] Still processing, no segments emitted yet ({elapsed}s elapsed)"
+                            'msg': f"[ASR] Still processing, no segments emitted yet ({elapsed}s elapsed)"
                                 if not first_segment_seen else
-                                f"[Whisper] Still processing remaining audio ({elapsed}s since transcription started)"
+                                f"[ASR] Still processing remaining audio ({elapsed}s since transcription started)"
                         })
                         last_heartbeat_at = now
                     if check_cancel and check_cancel():
-                        raise Exception("Transcription cancelled while waiting for Whisper output")
+                        raise Exception("Transcription cancelled while waiting for ASR output")
                     continue
 
                 if not first_segment_seen and progress_callback:
                     elapsed = int(time.monotonic() - wait_started_at)
-                    progress_callback({'type': 'status', 'msg': f"[Whisper] First segment received after {elapsed}s"})
+                    progress_callback({'type': 'status', 'msg': f"[ASR] First segment received after {elapsed}s"})
                 first_segment_seen = True
-                text_part = segment.text.strip()
-                if not text_part:
-                    continue
-                segments_data.append({
-                    'start': float(segment.start),
-                    'end': float(segment.end),
-                    'text': text_part,
-                })
-                    
-                if structured:
-                    timestamp = f"[{int(segment.start // 60):02d}:{int(segment.start % 60):02d}] "
-                    f.write(f"{timestamp}{text_part}\n")
-                    if text_part.endswith(('.', '!', '?')):
-                        f.write("\n")
-                else:
-                    if not first_segment:
-                        f.write(" ")
-                    f.write(text_part)
-                    first_segment = False
-                
+                text_part = (segment.text or "").strip()
+                if text_part:
+                    segments_data.append({
+                        'start': float(segment.start),
+                        'end': float(segment.end),
+                        'text': text_part,
+                    })
+
+                    if structured:
+                        timestamp = f"[{int(segment.start // 60):02d}:{int(segment.start % 60):02d}] "
+                        f.write(f"{timestamp}{text_part}\n")
+                        if text_part.endswith(('.', '!', '?')):
+                            f.write("\n")
+                    else:
+                        if not first_segment:
+                            f.write(" ")
+                        f.write(text_part)
+                        first_segment = False
+
                 # Send progress update based on audio duration
                 if progress_callback and total_duration > 0:
                     percent = min(99.0, (segment.end / total_duration) * 100.0)
@@ -217,14 +289,14 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
                             'msg': f"Progress: {cur_min:02d}:{cur_sec:02d} / {tot_min:02d}:{tot_sec:02d} ({percent:.1f}%)"
                         })
                         last_logged_percent = percent
-                
+
                 if check_cancel and check_cancel():
                     print(f"Stopping transcription loop for user request")
                     raise Exception("Transcription cancelled by user")
 
             if worker_error:
                 raise worker_error[0]
-        
+
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcription complete."})
     except Exception as e:
@@ -237,7 +309,7 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
             fw_logger.setLevel(original_level)
         except:
             pass
-            
+
     if return_segments:
         return segments_data
     return output_path

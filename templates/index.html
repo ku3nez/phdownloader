@@ -409,13 +409,25 @@
                 </div>
             </div>
             <div id="ai-options" style="margin-bottom: 20px; display: none;">
-                <label for="modelSelect" style="font-size: 14px; color: #aaa; margin-right: 10px;">Whisper Model:</label>
-                <select id="modelSelect"
-                    style="padding: 8px; border-radius: 5px; background-color: #2c2c2c; color: #fff; border: 1px solid #333;">
-                    <option value="tiny">Tiny (Fastest)</option>
-                    <option value="base" selected>Base (Default)</option>
-                    <option value="small">Small (Better Quality)</option>
-                </select>
+                <div style="margin-bottom: 12px;">
+                    <label for="languageSelect" style="font-size: 14px; color: #aaa; margin-right: 10px;">Language:</label>
+                    <select id="languageSelect" onchange="updateAsrOptions()"
+                        style="padding: 8px; border-radius: 5px; background-color: #2c2c2c; color: #fff; border: 1px solid #333;">
+                        <option value="auto" selected>Auto-detect</option>
+                        <option value="ru">Русский</option>
+                        <option value="be">Беларуская</option>
+                        <option value="en">English</option>
+                    </select>
+                </div>
+                <div id="whisperModelRow" style="margin-bottom: 8px;">
+                    <label for="modelSelect" style="font-size: 14px; color: #aaa; margin-right: 10px;">Whisper Model:</label>
+                    <select id="modelSelect"
+                        style="padding: 8px; border-radius: 5px; background-color: #2c2c2c; color: #fff; border: 1px solid #333;">
+                        <option value="small" selected>Small (Faster)</option>
+                        <option value="turbo">Turbo (Best quality, slow)</option>
+                    </select>
+                </div>
+                <div id="asrHint" style="font-size: 12px; color: #888;"></div>
             </div>
             <div id="structured-option" style="margin-bottom: 20px; display: none;">
                 <label style="cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #aaa;">
@@ -657,12 +669,15 @@
 
                 const modelLabel = document.querySelector('label[for="modelSelect"]');
                 if (modelLabel) modelLabel.textContent = 'Модель Whisper:';
+                const languageLabel = document.querySelector('label[for="languageSelect"]');
+                if (languageLabel) languageLabel.textContent = 'Язык записи:';
+                const languageSelectRu = document.getElementById('languageSelect');
+                if (languageSelectRu) languageSelectRu.options[0].textContent = 'Определить автоматически';
                 
                 const modelSelect = document.getElementById('modelSelect');
                 if (modelSelect) {
-                    modelSelect.options[0].textContent = 'Tiny (Самая быстрая)';
-                    modelSelect.options[1].textContent = 'Base (Обычная)';
-                    modelSelect.options[2].textContent = 'Small (Высокое качество)';
+                    modelSelect.options[0].textContent = 'Small (быстрее)';
+                    modelSelect.options[1].textContent = 'Turbo (лучшее качество, медленно)';
                 }
 
                 const logSummary = document.getElementById('logSummary');
@@ -695,12 +710,15 @@
 
                 const modelLabel = document.querySelector('label[for="modelSelect"]');
                 if (modelLabel) modelLabel.textContent = 'Модель Whisper:';
+                const languageLabel = document.querySelector('label[for="languageSelect"]');
+                if (languageLabel) languageLabel.textContent = 'Язык записи:';
+                const languageSelectRu = document.getElementById('languageSelect');
+                if (languageSelectRu) languageSelectRu.options[0].textContent = 'Определить автоматически';
                 
                 const modelSelect2 = document.getElementById('modelSelect');
                 if (modelSelect2) {
-                    modelSelect2.options[0].textContent = 'Tiny (Самая быстрая)';
-                    modelSelect2.options[1].textContent = 'Base (Обычная)';
-                    modelSelect2.options[2].textContent = 'Small (Высокое качество)';
+                    modelSelect2.options[0].textContent = 'Small (быстрее)';
+                    modelSelect2.options[1].textContent = 'Turbo (лучшее качество, медленно)';
                 }
             }
 
@@ -882,7 +900,9 @@
                 const structuredToggle = document.getElementById('structuredToggle');
                 const structured = structuredToggle ? structuredToggle.checked : true;
                 const modelSelect = document.getElementById('modelSelect');
-                const modelSize = modelSelect ? modelSelect.value : 'base';
+                const modelSize = modelSelect ? modelSelect.value : 'small';
+                const languageSelect = document.getElementById('languageSelect');
+                const language = languageSelect ? languageSelect.value : 'auto';
                 const telegramPublishCheckbox = document.getElementById('telegramPublishCheckbox');
                 const publishToTelegram = Boolean(
                     isLocalTelegramVideoRequest()
@@ -907,6 +927,7 @@
                     formData.append('download_type', format);
                     formData.append('structured', structured);
                     formData.append('model_size', modelSize);
+                    formData.append('language', language);
                     formData.append('server_only', saveOnServer);
                     formData.append('publish_to_telegram', publishToTelegram);
 
@@ -923,6 +944,7 @@
                             download_type: format,
                             structured: structured,
                             model_size: modelSize,
+                            language: language,
                             server_only: saveOnServer,
                             publish_to_telegram: publishToTelegram
                         })
@@ -1121,6 +1143,39 @@
                 }
             }, 1000);
         }
+
+        // The Whisper model only matters for languages Whisper handles.
+        function updateAsrOptions() {
+            const select = document.getElementById('languageSelect');
+            const row = document.getElementById('whisperModelRow');
+            const hint = document.getElementById('asrHint');
+            if (!select || !row || !hint) return;
+            const language = select.value;
+            try { localStorage.setItem('asr_language', language); } catch (e) {}
+            row.style.display = (language === 'ru' || language === 'en') ? 'none' : 'block';
+            const hints = isRussian ? {
+                auto: 'Русский распознаёт GigaAM, английский — Parakeet, остальные языки — Whisper.',
+                ru: 'GigaAM v3 — быстрый распознаватель для русского.',
+                en: 'Parakeet v3 — быстрый распознаватель для английского.',
+                be: 'Беларускую мову распознаёт Whisper. Turbo точнее, но заметно медленнее.'
+            } : {
+                auto: 'Russian uses GigaAM, English uses Parakeet, other languages use Whisper.',
+                ru: 'GigaAM v3, a fast recogniser for Russian.',
+                en: 'Parakeet v3, a fast recogniser for English.',
+                be: 'Belarusian uses Whisper. Turbo is more accurate but noticeably slower.'
+            };
+            hint.textContent = hints[language] || hints.auto;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const select = document.getElementById('languageSelect');
+            let saved = null;
+            try { saved = localStorage.getItem('asr_language'); } catch (e) {}
+            if (select && saved && Array.from(select.options).some(option => option.value === saved)) {
+                select.value = saved;
+            }
+            updateAsrOptions();
+        });
 
         // Show/hide structured option based on format
         function updateStructuredOptionVisibility() {
