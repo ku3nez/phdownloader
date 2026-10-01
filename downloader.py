@@ -340,6 +340,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     # preferred runtime, node is the fallback (yt-dlp needs node >= 22).
     js_runtimes = [item.strip() for item in os.getenv('YT_DLP_JS_RUNTIME', 'deno,node').split(',') if item.strip()]
     proxy = os.getenv('YT_DLP_PROXY')  # e.g. socks5://127.0.0.1:1080 or http://host:port
+    # Optional proxy used only for YouTube, e.g. a SOCKS tunnel through a node
+    # whose IP YouTube does not bot-check. Other sites keep the direct route.
+    youtube_proxy = os.getenv('YT_DLP_YOUTUBE_PROXY')
     fragment_concurrency_raw = os.getenv('YT_DLP_CONCURRENT_FRAGMENT_DOWNLOADS', '4')
     try:
         fragment_concurrency = int(fragment_concurrency_raw)
@@ -450,7 +453,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'cookiefile': active_cookie_file,
         'js_runtimes': {runtime: {} for runtime in js_runtimes} or None,
         'remote_components': ['ejs:github'],
-        'proxy': proxy if proxy else None,
+        'proxy': (youtube_proxy if is_youtube and youtube_proxy else proxy) or None,
     }
 
     if media_type == 'audio':

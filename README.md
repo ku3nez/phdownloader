@@ -105,6 +105,7 @@ Set configuration values in `.env`. Do not commit that file.
 | `YT_DLP_COOKIE_FILE` | `cookies.txt` | Optional Netscape cookie file for sites that require an authenticated session. Every node that may process a task must have an up-to-date copy at this path. A configured but missing file is reported in the task log. |
 | `YT_DLP_COOKIES_BROWSER` | unset | Optional browser name used to read local cookies on the worker. |
 | `YT_DLP_PROXY` | unset | Optional HTTP/SOCKS proxy URL for yt-dlp. |
+| `YT_DLP_YOUTUBE_PROXY` | unset | Proxy used only for YouTube (overrides `YT_DLP_PROXY` there). Lets a node whose IP YouTube bot-checks consume the YouTube queue, e.g. `socks5://127.0.0.1:1080` from `deploy/phdownloader-yt-tunnel.service`. |
 | `YT_DLP_JS_RUNTIME` | `deno,node` | Comma-separated JavaScript runtimes for yt-dlp's YouTube challenges; the first available is used. node must be 22 or newer. |
 | `TELEGRAM_API_ID` | unset | Telegram application ID; keep only in the publishing node’s `.env`. |
 | `TELEGRAM_API_HASH` | unset | Telegram application hash; keep only in the publishing node’s `.env`. |

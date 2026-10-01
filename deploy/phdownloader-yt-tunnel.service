@@ -1,0 +1,17 @@
+# SOCKS5 tunnel for YouTube traffic through a node YouTube accepts.
+# On the proxy node: create a user with a nologin shell and authorize this
+# node's key with: restrict,port-forwarding,command="/usr/sbin/nologin" <key>
+# On this node: set YT_DLP_YOUTUBE_PROXY=socks5://127.0.0.1:1080 in .env.
+# bash wraps ssh because SELinux (AlmaLinux) denies init_t executing ssh directly.
+[Unit]
+Description=SOCKS tunnel for phdownloader YouTube traffic
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/bin/bash -c "exec /usr/bin/ssh -N -D 127.0.0.1:1080 -i /root/.ssh/phd_yt_tunnel -o UserKnownHostsFile=/root/.ssh/phd_yt_tunnel_known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 phdtunnel@81.88.23.239"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
