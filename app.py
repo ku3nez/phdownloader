@@ -19,12 +19,13 @@ from cluster_config import (
     RQ_PORNHUB_QUEUE_NAME,
     RQ_TELEGRAM_QUEUE_NAME,
     RQ_TRANSCRIPT_QUEUE_NAME,
+    RQ_YOUTUBE_QUEUE_NAME,
     SHARED_STORAGE_ROOT,
     TASK_QUEUE_TIMEOUT_SECONDS,
     TASK_STALL_TIMEOUT_SECONDS,
     TASKS_ROOT,
 )
-from media_urls import is_pornhub_url
+from media_urls import is_pornhub_url, is_youtube_url
 from task_store import RQ_WAITING_STATUSES, TaskStore
 
 
@@ -382,7 +383,12 @@ def start_download():
                 server_only=server_only,
             )
     else:
-        if download_type == "transcript":
+        if is_youtube_url(url):
+            # Includes YouTube transcripts: the download must run on a node
+            # YouTube accepts; long transcriptions are still split into chunks
+            # on the transcript queue.
+            queue_name = RQ_YOUTUBE_QUEUE_NAME
+        elif download_type == "transcript":
             queue_name = RQ_TRANSCRIPT_QUEUE_NAME
         elif is_pornhub_url(url):
             queue_name = RQ_PORNHUB_QUEUE_NAME

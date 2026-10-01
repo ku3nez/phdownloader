@@ -1,0 +1,9 @@
+[Unit]
+Description=Update yt-dlp (nightly) for phdownloader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/phdownloader/venv/bin/pip install -q -U --pre "yt-dlp[default,curl-cffi]"
+ExecStartPost=/opt/phdownloader/venv/bin/yt-dlp --version

@@ -6,7 +6,7 @@ import time
 from dotenv import load_dotenv
 import builtins
 
-from media_urls import pornhub_domain
+from media_urls import is_youtube_url, pornhub_domain
 
 def safe_print(*args, **kwargs):
     try:
@@ -336,7 +336,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     configured_cookie_file = os.getenv('YT_DLP_COOKIE_FILE')
     cookie_file = configured_cookie_file or 'cookies.txt'
     cookies_browser = os.getenv('YT_DLP_COOKIES_BROWSER')
-    js_runtime = os.getenv('YT_DLP_JS_RUNTIME', 'node')
+    # Comma-separated; yt-dlp uses the first available runtime. deno is its
+    # preferred runtime, node is the fallback (yt-dlp needs node >= 22).
+    js_runtimes = [item.strip() for item in os.getenv('YT_DLP_JS_RUNTIME', 'deno,node').split(',') if item.strip()]
     proxy = os.getenv('YT_DLP_PROXY')  # e.g. socks5://127.0.0.1:1080 or http://host:port
     fragment_concurrency_raw = os.getenv('YT_DLP_CONCURRENT_FRAGMENT_DOWNLOADS', '4')
     try:
@@ -382,7 +384,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             if progress_callback:
                 progress_callback({'type': 'status', 'msg': f"WARNING: Browser '{cookies_browser}' not found, trying without browser cookies..."})
 
-    is_youtube = 'youtube.com' in url.lower() or 'youtu.be' in url.lower()
+    is_youtube = is_youtube_url(url)
     ph_domain = pornhub_domain(url)
     is_ph = ph_domain is not None
 
@@ -446,7 +448,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'progress_hooks': [hook],
         'cookiesfrombrowser': (active_cookies_browser,) if active_cookies_browser and not active_cookie_file else None,
         'cookiefile': active_cookie_file,
-        'js_runtimes': {js_runtime: {}} if js_runtime else None,
+        'js_runtimes': {runtime: {} for runtime in js_runtimes} or None,
         'remote_components': ['ejs:github'],
         'proxy': proxy if proxy else None,
     }
@@ -566,7 +568,12 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                 error_msg = f"Unknown Error: {type(e).__name__}"
             
             # Provide helpful hints for common errors
-            if 'HTTP Error 403' in error_msg or 'Forbidden' in error_msg:
+            if is_youtube and ('confirm you' in error_msg and 'not a bot' in error_msg):
+                error_msg = (
+                    "YouTube rejected this server's IP (\"Sign in to confirm you're not a bot\").\n"
+                    "Process YouTube on nodes YouTube accepts (RQ_YOUTUBE_QUEUE_NAME) or provide fresh cookies.txt."
+                )
+            elif 'HTTP Error 403' in error_msg or 'Forbidden' in error_msg:
                 if is_ph:
                     error_msg = (
                         "HTTP Error 403: PornHub requires browser cookies for access.\n"
@@ -575,9 +582,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                     )
                 elif is_youtube:
                     error_msg = (
-                        "HTTP Error 403: YouTube is blocking the request.\n"
-                        "Try setting YT_DLP_COOKIES_BROWSER=chrome in your .env file "
-                        "to use your browser session cookies."
+                        "HTTP Error 403: YouTube refused the media stream.\n"
+                        "Usually yt-dlp is outdated (YouTube changes often): update it with "
+                        "pip install -U --pre 'yt-dlp[default,curl-cffi]'. If it persists, refresh cookies.txt."
                     )
             
             full_tb = traceback.format_exc()

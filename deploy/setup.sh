@@ -39,6 +39,16 @@ if ! require_python_311 "$PYTHON_BIN"; then
   exit 1
 fi
 
+# deno is yt-dlp's preferred JavaScript runtime for YouTube challenges.
+if ! command -v deno >/dev/null 2>&1; then
+  echo "Installing deno..."
+  tmp_zip="$(mktemp --suffix=.zip)"
+  curl -fsSL -o "$tmp_zip" https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip
+  python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extract("deno", "/usr/local/bin")' "$tmp_zip"
+  chmod 755 /usr/local/bin/deno
+  rm -f "$tmp_zip"
+fi
+
 echo "=== 2. Setting up Python Virtual Environment ==="
 if [ -x "$VENV_DIR/bin/python" ] && ! require_python_311 "$VENV_DIR/bin/python"; then
   backup_dir="${VENV_DIR}.python310.$(date +%Y%m%d%H%M%S)"
@@ -59,6 +69,9 @@ if [ -f "$PROJECT_DIR/requirements.txt" ]; then
 else
   echo "Warning: requirements.txt not found in $PROJECT_DIR."
 fi
+# YouTube breaks older extractors quickly; the nightly build carries fixes
+# weeks before a stable release.
+"$VENV_DIR/bin/pip" install -U --pre "yt-dlp[default,curl-cffi]"
 "$VENV_DIR/bin/python" -c 'import sys, curl_cffi, yt_dlp; assert sys.version_info >= (3, 11); print(f"Python {sys.version.split()[0]}, yt-dlp {yt_dlp.version.__version__}, curl-cffi {curl_cffi.__version__}")'
 
 echo "=== 4. Configuring Systemd services ==="
@@ -68,6 +81,8 @@ if [ ! -f "$PROJECT_DIR/deploy/phdownloader-api.service" ] || [ ! -f "$PROJECT_D
 fi
 cp "$PROJECT_DIR/deploy/phdownloader-api.service" /etc/systemd/system/phdownloader-api.service
 cp "$PROJECT_DIR/deploy/phdownloader-worker.service" /etc/systemd/system/phdownloader-worker.service
+cp "$PROJECT_DIR/deploy/phdownloader-ytdlp-update.service" /etc/systemd/system/phdownloader-ytdlp-update.service
+cp "$PROJECT_DIR/deploy/phdownloader-ytdlp-update.timer" /etc/systemd/system/phdownloader-ytdlp-update.timer
 
 # Ensure log file exists and is writable
 touch /var/log/phdownloader.log
@@ -83,6 +98,9 @@ fi
 systemctl daemon-reload
 systemctl enable phdownloader-api phdownloader-worker
 systemctl restart phdownloader-api phdownloader-worker
+# RQ imports job code in a fresh work-horse process for every job, so an
+# updated yt-dlp is used by the next job without restarting the worker.
+systemctl enable --now phdownloader-ytdlp-update.timer
 
 echo "=== 5. Configuring Fail2ban ==="
 # Copy fail2ban filter

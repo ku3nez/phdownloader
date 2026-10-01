@@ -24,3 +24,11 @@ def pornhub_domain(url: str | None) -> str | None:
 def is_pornhub_url(url: str | None) -> bool:
     """Accept PornHub's supported primary domains and their subdomains only."""
     return pornhub_domain(url) is not None
+
+
+YOUTUBE_DOMAINS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+
+
+def is_youtube_url(url: str | None) -> bool:
+    hostname = url_hostname(url)
+    return any(hostname == domain or hostname.endswith("." + domain) for domain in YOUTUBE_DOMAINS)

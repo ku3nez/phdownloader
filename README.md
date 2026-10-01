@@ -88,6 +88,7 @@ Set configuration values in `.env`. Do not commit that file.
 | `RQ_DEFAULT_QUEUE_NAME` | `phdownloader-default` | Queue for video and audio downloads. |
 | `RQ_TRANSCRIPT_QUEUE_NAME` | `phdownloader-transcript` | Queue for transcription and distributed chunks. |
 | `RQ_PORNHUB_QUEUE_NAME` | `phdownloader-pornhub` | Dedicated queue for PornHub downloads. Assign it only to workers whose IP is accepted by PornHub. |
+| `RQ_YOUTUBE_QUEUE_NAME` | `phdownloader-youtube` | Dedicated queue for YouTube downloads and YouTube transcripts. Assign it only to workers whose IP YouTube does not bot-check; long transcriptions are still split onto the transcript queue. |
 | `RQ_TELEGRAM_QUEUE_NAME` | `phdownloader-telegram` | Dedicated queue for Telegram publication. Assign it to exactly one node that holds the Telegram account session. |
 | `RQ_WORKER_PROCESSES` | `1` | Worker processes started by the systemd worker unit. |
 | `RQ_WORKER_QUEUES` | `phdownloader-default` | Queues consumed by the systemd worker unit. Include the transcription and PornHub queues only on nodes assigned to those workloads. |
@@ -104,7 +105,7 @@ Set configuration values in `.env`. Do not commit that file.
 | `YT_DLP_COOKIE_FILE` | `cookies.txt` | Optional Netscape cookie file for sites that require an authenticated session. Every node that may process a task must have an up-to-date copy at this path. A configured but missing file is reported in the task log. |
 | `YT_DLP_COOKIES_BROWSER` | unset | Optional browser name used to read local cookies on the worker. |
 | `YT_DLP_PROXY` | unset | Optional HTTP/SOCKS proxy URL for yt-dlp. |
-| `YT_DLP_JS_RUNTIME` | `node` | JavaScript runtime passed to yt-dlp. |
+| `YT_DLP_JS_RUNTIME` | `deno,node` | Comma-separated JavaScript runtimes for yt-dlp's YouTube challenges; the first available is used. node must be 22 or newer. |
 | `TELEGRAM_API_ID` | unset | Telegram application ID; keep only in the publishing node’s `.env`. |
 | `TELEGRAM_API_HASH` | unset | Telegram application hash; keep only in the publishing node’s `.env`. |
 | `TELEGRAM_PHONE` | unset | Phone number of the Telegram account used for publication. |
@@ -137,7 +138,7 @@ cd /opt/phdownloader
 sudo ./deploy/setup.sh
 ```
 
-The script requires and creates a Python 3.11+ virtual environment, installs `curl-cffi`, and starts `phdownloader-api` and `phdownloader-worker`. If an existing virtual environment uses Python 3.10, it is preserved with a timestamped `.python310.*` suffix and replaced. It disables the obsolete single-process `phdownloader` service so it cannot occupy the API port.
+The script requires and creates a Python 3.11+ virtual environment, installs `curl-cffi`, deno and the nightly yt-dlp build, enables a daily `phdownloader-ytdlp-update.timer` (YouTube frequently breaks older yt-dlp versions), and starts `phdownloader-api` and `phdownloader-worker`. If an existing virtual environment uses Python 3.10, it is preserved with a timestamped `.python310.*` suffix and replaced. It disables the obsolete single-process `phdownloader` service so it cannot occupy the API port.
 
 Downloaded-media links are logged in `${SHARED_STORAGE_ROOT}/download_links.log` by default. Set `DOWNLOAD_LINKS_LOG_PATH` in `.env` only when a different shared path is required.
 

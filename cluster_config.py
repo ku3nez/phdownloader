@@ -22,6 +22,9 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/7")
 RQ_DEFAULT_QUEUE_NAME = os.getenv("RQ_DEFAULT_QUEUE_NAME", "phdownloader-default")
 RQ_TRANSCRIPT_QUEUE_NAME = os.getenv("RQ_TRANSCRIPT_QUEUE_NAME", "phdownloader-transcript")
 RQ_PORNHUB_QUEUE_NAME = os.getenv("RQ_PORNHUB_QUEUE_NAME", "phdownloader-pornhub")
+# YouTube blocks many datacenter IP ranges ("Sign in to confirm you are not a
+# bot"). Only nodes whose IP YouTube accepts should consume this queue.
+RQ_YOUTUBE_QUEUE_NAME = os.getenv("RQ_YOUTUBE_QUEUE_NAME", "phdownloader-youtube")
 RQ_TELEGRAM_QUEUE_NAME = os.getenv("RQ_TELEGRAM_QUEUE_NAME", "phdownloader-telegram")
 RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", 60 * 60 * 6))
 RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", 60 * 60 * 24))
