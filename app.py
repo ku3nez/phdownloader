@@ -5,7 +5,6 @@ import threading
 import time
 import unicodedata
 import uuid
-from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, send_file
@@ -21,10 +20,12 @@ from cluster_config import (
     RQ_TELEGRAM_QUEUE_NAME,
     RQ_TRANSCRIPT_QUEUE_NAME,
     SHARED_STORAGE_ROOT,
+    TASK_QUEUE_TIMEOUT_SECONDS,
     TASK_STALL_TIMEOUT_SECONDS,
     TASKS_ROOT,
 )
-from task_store import TaskStore
+from media_urls import is_pornhub_url
+from task_store import RQ_WAITING_STATUSES, TaskStore
 
 
 def safe_print(*args, **kwargs):
@@ -61,17 +62,6 @@ def task_dir(task_id: str) -> str:
     return os.path.join(TASKS_ROOT, task_id)
 
 
-def is_pornhub_url(url: str | None) -> bool:
-    """Accept PornHub's supported primary domains and their subdomains only."""
-    if not url:
-        return False
-    try:
-        hostname = (urlparse(url).hostname or "").lower().rstrip(".")
-    except (TypeError, ValueError):
-        return False
-    return hostname in {"pornhub.com", "pornhub.org"} or hostname.endswith((".pornhub.com", ".pornhub.org"))
-
-
 def remove_active_marker(task_id: str) -> None:
     """Allow terminal tasks to expire from the shared task directory."""
     try:
@@ -82,11 +72,38 @@ def remove_active_marker(task_id: str) -> None:
         log_event("cleanup", f"failed to remove active marker task_id={task_id}: {exc}")
 
 
-def mark_stalled_task_failed(task_id: str, task: dict, now: float) -> None:
+def is_waiting_for_worker(task: dict) -> bool:
+    """True when the task's next step is still sitting in an RQ queue.
+
+    Queue waits are not stalls: with busy workers a job can legitimately wait
+    much longer than TASK_STALL_TIMEOUT_SECONDS before any worker updates it.
+    """
+    if task.get("status") == "queued":
+        job_id = task.get("rq_job_id")
+        # The job ID is written right after enqueue; without it the task is
+        # still being created.
+        return not job_id or store.get_job_status(job_id) in RQ_WAITING_STATUSES
+    if task.get("processing_mode") == "distributed":
+        for chunk in task.get("chunks", []):
+            if chunk.get("status") in {"queued", "processing"} and store.get_job_status(chunk.get("rq_job_id")) in RQ_WAITING_STATUSES:
+                return True
+    return False
+
+
+def mark_stalled_task_failed(task_id: str, task: dict, now: float, waiting: bool = False) -> None:
     updated_at = int(task.get("updated_at", 0) or 0)
     stalled_for = max(0, int(now) - updated_at)
-    error = f"Task stopped updating for {stalled_for}s (watchdog timeout: {TASK_STALL_TIMEOUT_SECONDS}s)"
-    store.set_status(task_id, "failed", error=error, current_status="Task failed: worker stopped reporting progress.")
+    if waiting:
+        error = f"No worker picked up the task for {stalled_for}s (queue timeout: {TASK_QUEUE_TIMEOUT_SECONDS}s)"
+        current_status = "Task failed: no worker is consuming its queue."
+        store.cancel_job(task.get("rq_job_id"))
+        for chunk in task.get("chunks", []):
+            if chunk.get("status") in {"queued", "processing"}:
+                store.cancel_job(chunk.get("rq_job_id"))
+    else:
+        error = f"Task stopped updating for {stalled_for}s (watchdog timeout: {TASK_STALL_TIMEOUT_SECONDS}s)"
+        current_status = "Task failed: worker stopped reporting progress."
+    store.set_status(task_id, "failed", error=error, current_status=current_status)
     store.append_log(task_id, f"[{task_id}] {error}; marked failed by watchdog")
     remove_active_marker(task_id)
     # Retain the error response for the normal expiration period instead of
@@ -180,6 +197,11 @@ def calculate_eta(task: dict | None) -> int | None:
 def cleanup_downloads() -> None:
     while True:
         try:
+            # Every gunicorn process on every API node starts this thread. The
+            # short-lived Redis lock lets only one of them run each pass.
+            if not store.acquire_global_lock("cleanup", max(1, CLEANUP_INTERVAL_SECONDS - 1)):
+                time.sleep(CLEANUP_INTERVAL_SECONDS)
+                continue
             os.makedirs(TASKS_ROOT, exist_ok=True)
             now = time.time()
             for item in os.listdir(TASKS_ROOT):
@@ -189,8 +211,11 @@ def cleanup_downloads() -> None:
                     if task and task.get("status") in {"queued", "processing"}:
                         updated_at = int(task.get("updated_at", 0) or 0)
                         if now - updated_at > TASK_STALL_TIMEOUT_SECONDS:
-                            mark_stalled_task_failed(item, task, now)
-                            continue
+                            waiting = is_waiting_for_worker(task)
+                            limit = TASK_QUEUE_TIMEOUT_SECONDS if waiting else TASK_STALL_TIMEOUT_SECONDS
+                            if now - updated_at > limit:
+                                mark_stalled_task_failed(item, task, now, waiting=waiting)
+                                continue
                         log_event("cleanup", f"skip active task_id={item} status={task.get('status')}")
                         continue
                     if task and task.get("status") == "cancelled":

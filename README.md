@@ -94,7 +94,11 @@ Set configuration values in `.env`. Do not commit that file.
 | `TRANSCRIPTION_DISTRIBUTED_ENABLED` | `true` | Enables splitting long media into distributed transcription chunks. |
 | `TRANSCRIPTION_MIN_DISTRIBUTED_SECONDS` | `900` | Minimum media duration that activates distributed transcription. |
 | `TRANSCRIPTION_CHUNK_SECONDS` | `600` | Target duration of each FFmpeg audio chunk. |
-| `TASK_STALL_TIMEOUT_SECONDS` | `300` | Marks a queued or processing task as failed when it has not updated within this period, then removes its active marker. |
+| `TASK_STALL_TIMEOUT_SECONDS` | `300` | Marks a running task as failed when its worker has not updated it (progress or heartbeat) within this period, then removes its active marker. |
+| `TASK_QUEUE_TIMEOUT_SECONDS` | `10800` | A task whose job is still waiting in an RQ queue is not considered stalled; it fails only after waiting this long, and its queued jobs are cancelled. |
+| `TASK_HEARTBEAT_SECONDS` | `min(60, TASK_STALL_TIMEOUT_SECONDS/4)` | How often a running job refreshes its task, so silent steps (FFmpeg merge, audio splitting) are not mistaken for a dead worker. |
+| `TRANSCRIPTION_CHUNK_RETRIES` | `2` | Extra attempts for a failed distributed transcription chunk before the whole task fails. Retries are requeued immediately, so no RQ scheduler is required. |
+| `TRANSCRIPTION_CHUNK_RETRY_DELAY_SECONDS` | `10` | Pause inside the failed chunk job before it is requeued. |
 | `DOWNLOAD_LINKS_LOG_PATH` | `${SHARED_STORAGE_ROOT}/download_links.log` | Optional explicit path for the successful-download source-link log. |
 | `YT_DLP_CONCURRENT_FRAGMENT_DOWNLOADS` | `4` | Simultaneous HLS fragments, clamped to 1–32. Raise this on capable worker nodes to improve HLS download throughput. |
 | `YT_DLP_COOKIE_FILE` | `cookies.txt` | Optional Netscape cookie file for sites that require an authenticated session. Every node that may process a task must have an up-to-date copy at this path. A configured but missing file is reported in the task log. |

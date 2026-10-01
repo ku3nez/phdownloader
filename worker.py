@@ -1,21 +1,27 @@
+import functools
 import json
 import math
 import os
 import shutil
 import socket
 import subprocess
+import threading
+import time
 import traceback
 from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
-from rq import Retry
+from rq import Retry, get_current_job
 
 from cluster_config import (
     RQ_TELEGRAM_QUEUE_NAME,
     RQ_TRANSCRIPT_QUEUE_NAME,
     SHARED_STORAGE_ROOT,
+    TASK_HEARTBEAT_SECONDS,
     TASKS_ROOT,
+    TRANSCRIPTION_CHUNK_RETRIES,
+    TRANSCRIPTION_CHUNK_RETRY_DELAY_SECONDS,
     TRANSCRIPTION_CHUNK_SECONDS,
     TRANSCRIPTION_DISTRIBUTED_ENABLED,
     TRANSCRIPTION_MIN_DISTRIBUTED_SECONDS,
@@ -40,6 +46,40 @@ def log_event(task_id: str, message: str) -> None:
     line = f"[{task_id}] {message}"
     print(line, flush=True)
     store.append_log(task_id, line)
+
+
+def with_task_heartbeat(func):
+    """Refresh the task while the RQ job runs.
+
+    The thread lives inside the job process, so a crashed or killed worker
+    still stops heartbeating and the API watchdog marks the task failed.
+    """
+
+    @functools.wraps(func)
+    def wrapper(task_id: str, *args, **kwargs):
+        stop = threading.Event()
+
+        def beat() -> None:
+            while not stop.wait(TASK_HEARTBEAT_SECONDS):
+                try:
+                    store.touch_task(task_id)
+                except Exception as exc:
+                    print(f"[{task_id}] heartbeat failed: {exc}", flush=True)
+
+        thread = threading.Thread(target=beat, daemon=True, name=f"heartbeat-{task_id}")
+        thread.start()
+        try:
+            return func(task_id, *args, **kwargs)
+        finally:
+            stop.set()
+            thread.join(timeout=5)
+
+    return wrapper
+
+
+def current_job_retries_left() -> int:
+    job = get_current_job()
+    return int(getattr(job, "retries_left", None) or 0) if job else 0
 
 
 def log_download_link(url: str, file_path: str) -> bool:
@@ -345,7 +385,10 @@ def enqueue_distributed_transcription(task_id: str, file_path: str, structured: 
             task_id,
             chunk["chunk_id"],
             queue_name=RQ_TRANSCRIPT_QUEUE_NAME,
-            retry=Retry(max=2, interval=[15, 60]),
+            # No retry interval: interval-based retries become "scheduled" RQ
+            # jobs that only run on workers started with --with-scheduler.
+            # The back-off sleep happens in the failing job instead.
+            retry=Retry(max=TRANSCRIPTION_CHUNK_RETRIES) if TRANSCRIPTION_CHUNK_RETRIES > 0 else None,
         )
         store.update_chunk(task_id, chunk["chunk_id"], rq_job_id=job.id, queue_name=job.origin)
         log_event(task_id, f"enqueued {chunk['chunk_id']} rq_job_id={job.id} queue={job.origin}")
@@ -409,6 +452,7 @@ def try_finalize_distributed_transcription(task_id: str) -> None:
         store.release_lock(task_id, "finalize")
 
 
+@with_task_heartbeat
 def process_uploaded_transcription(task_id: str, file_path: str, structured: bool = True, model_size: str = "base", server_only: bool = False) -> None:
     store.set_status(task_id, "processing", worker_node=NODE_NAME)
     log_event(task_id, f"process_uploaded_transcription worker_node={NODE_NAME} file_path={file_path}")
@@ -461,6 +505,7 @@ def process_uploaded_video(task_id: str, file_path: str, server_only: bool = Tru
         remove_active_marker(active_marker)
 
 
+@with_task_heartbeat
 def process_transcription_chunk(task_id: str, chunk_id: str) -> None:
     chunk = store.get_chunk(task_id, chunk_id)
     if not chunk:
@@ -522,6 +567,24 @@ def process_transcription_chunk(task_id: str, chunk_id: str) -> None:
             log_event(task_id, f"chunk cancelled chunk_id={chunk_id}: {exc}")
             update_distributed_progress(task_id)
             return
+        retries_left = current_job_retries_left()
+        if retries_left > 0 and get_task_status(task_id) not in TERMINAL_TASK_STATUSES:
+            # RQ will requeue this chunk; keep the parent task alive.
+            store.update_chunk(
+                task_id,
+                chunk_id,
+                status="queued",
+                progress=0.0,
+                error=str(exc),
+                last_status=f"Attempt failed on {NODE_NAME}; retrying ({retries_left} left)",
+                worker_node=NODE_NAME,
+            )
+            log_event(task_id, f"chunk attempt failed chunk_id={chunk_id} retries_left={retries_left}: {exc}")
+            log_event(task_id, traceback.format_exc())
+            update_distributed_progress(task_id)
+            if TRANSCRIPTION_CHUNK_RETRY_DELAY_SECONDS:
+                time.sleep(TRANSCRIPTION_CHUNK_RETRY_DELAY_SECONDS)
+            raise
         store.update_chunk(task_id, chunk_id, status="failed", error=str(exc), worker_node=NODE_NAME)
         store.set_status(task_id, "failed", error=f"Chunk {chunk_id} failed: {exc}")
         log_event(task_id, f"chunk failed chunk_id={chunk_id}: {exc}")
@@ -531,6 +594,7 @@ def process_transcription_chunk(task_id: str, chunk_id: str) -> None:
         raise
 
 
+@with_task_heartbeat
 def process_remote_media(task_id: str, url: str, quality: str = "720", download_type: str = "video", structured: bool = True, model_size: str = "base", server_only: bool = False) -> None:
     store.set_status(task_id, "processing", worker_node=NODE_NAME)
     task_dir = os.path.join(TASKS_ROOT, task_id)

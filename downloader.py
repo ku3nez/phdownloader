@@ -6,6 +6,8 @@ import time
 from dotenv import load_dotenv
 import builtins
 
+from media_urls import pornhub_domain
+
 def safe_print(*args, **kwargs):
     try:
         builtins.print(*args, **kwargs)
@@ -381,7 +383,8 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                 progress_callback({'type': 'status', 'msg': f"WARNING: Browser '{cookies_browser}' not found, trying without browser cookies..."})
 
     is_youtube = 'youtube.com' in url.lower() or 'youtu.be' in url.lower()
-    is_ph = 'pornhub.com' in url.lower()
+    ph_domain = pornhub_domain(url)
+    is_ph = ph_domain is not None
 
     import shutil
     has_aria2 = shutil.which('aria2c') is not None
@@ -438,7 +441,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             'Sec-Fetch-Mode': 'navigate',
             'Sec-Fetch-Site': 'none',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            'Referer': 'https://www.youtube.com/' if is_youtube else ('https://www.pornhub.com/' if is_ph else url),
+            'Referer': 'https://www.youtube.com/' if is_youtube else (f'https://www.{ph_domain}/' if is_ph else url),
         },
         'progress_hooks': [hook],
         'cookiesfrombrowser': (active_cookies_browser,) if active_cookies_browser and not active_cookie_file else None,

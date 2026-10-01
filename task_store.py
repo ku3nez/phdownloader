@@ -1,4 +1,6 @@
 import json
+import os
+import socket
 import time
 from typing import Any
 
@@ -13,11 +15,29 @@ def utc_ts() -> int:
     return int(time.time())
 
 
+TERMINAL_TASK_STATUSES = ("completed", "failed", "cancelled")
+# RQ states in which a job has not started yet but is expected to run later.
+RQ_WAITING_STATUSES = {"queued", "scheduled", "deferred"}
+
+# Refresh a task only while it exists and is not terminal. Doing the check and
+# the write atomically prevents a heartbeat from recreating a task hash that
+# the cleanup loop has just deleted.
+_TOUCH_TASK_SCRIPT = """
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+local status = redis.call('HGET', KEYS[1], 'status')
+if status == ARGV[2] or status == ARGV[3] or status == ARGV[4] then return 0 end
+redis.call('HSET', KEYS[1], 'heartbeat_at', ARGV[1], 'updated_at', ARGV[1])
+return 1
+"""
+
+
 class TaskStore:
     def __init__(self):
         self.redis = Redis.from_url(REDIS_URL, decode_responses=True)
         self.rq_redis = Redis.from_url(REDIS_URL, decode_responses=False)
         self.default_queue_name = RQ_DEFAULT_QUEUE_NAME
+        self._touch_task_script = self.redis.register_script(_TOUCH_TASK_SCRIPT)
+        self.owner_id = f"{socket.gethostname()}:{os.getpid()}"
 
     def task_key(self, task_id: str) -> str:
         return f"phd:task:{task_id}"
@@ -45,6 +65,11 @@ class TaskStore:
         payload = {k: self._encode(v) for k, v in fields.items()}
         payload["updated_at"] = str(utc_ts())
         self.redis.hset(self.task_key(task_id), mapping=payload)
+
+    def touch_task(self, task_id: str) -> bool:
+        """Record a worker heartbeat for an active task."""
+        now = str(utc_ts())
+        return bool(self._touch_task_script(keys=[self.task_key(task_id)], args=[now, *TERMINAL_TASK_STATUSES]))
 
     def append_log(self, task_id: str, message: str, limit: int = 200) -> None:
         key = self.logs_key(task_id)
@@ -169,6 +194,10 @@ class TaskStore:
     def release_lock(self, task_id: str, name: str) -> None:
         self.redis.delete(self.lock_key(task_id, name))
 
+    def acquire_global_lock(self, name: str, ttl: int) -> bool:
+        """Let exactly one API process across all nodes run a periodic step."""
+        return bool(self.redis.set(f"phd:lock:{name}", self.owner_id, nx=True, ex=max(1, int(ttl))))
+
     def enqueue(self, func: str, *args: Any, queue_name: str | None = None, **kwargs: Any):
         queue = Queue(
             queue_name or self.default_queue_name,
@@ -186,9 +215,19 @@ class TaskStore:
         except Exception:
             return None
         try:
-            return job.get_status(refresh=True)
+            status = job.get_status(refresh=True)
         except Exception:
             return None
+        return getattr(status, "value", status)
+
+    def cancel_job(self, job_id: str | None) -> None:
+        """Best-effort removal of a job that should no longer run."""
+        if not job_id:
+            return
+        try:
+            Job.fetch(job_id, connection=self.rq_redis).cancel()
+        except Exception:
+            pass
 
     @staticmethod
     def _encode(value: Any) -> str:

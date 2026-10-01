@@ -4,3 +4,11 @@ download_links.log
 telegram.session
 telegram.session-journal
 telegram-auth.json
+
+# Local artifacts that must not reach the public repository
+*.zip
+*.tar.gz
+_decoded_source.txt
+*transcript*.txt
+consultants_*.txt
+cookies.txt
