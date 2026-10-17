@@ -12,7 +12,7 @@ A web application for downloading media and creating transcripts. Flask accepts 
 
 ### Media downloads
 
-- **Multi-site extraction:** uses `yt-dlp` and supports YouTube, PornHub, and the other sites supported by that extractor.
+- **Multi-site extraction:** uses `yt-dlp` and supports YouTube, PornHub, and the other sites supported by that extractor. Threads posts (threads.com / threads.net, including share links), which yt-dlp does not support, are read by a built-in extractor.
 - **Video and audio modes:** downloads MP4 video or extracts MP3 audio. Video quality can be 360p, 480p, 720p, 1080p, or the best available format.
 - **Reliable format selection:** prefers separate MP4 video and M4A audio streams, then uses compatible fallbacks when a selected quality is unavailable.
 - **Browser impersonation:** installs `curl-cffi` and requests a Chrome impersonation target for hosts that require a browser-like TLS fingerprint.

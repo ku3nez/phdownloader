@@ -22,9 +22,15 @@ if command -v apt-get >/dev/null 2>&1; then
   apt-get install -y python3.11 python3.11-venv ffmpeg fail2ban curl aria2 nodejs
   : "${PYTHON_BIN:=python3.11}"
 elif command -v dnf >/dev/null 2>&1; then
-  # AlmaLinux/RHEL 10 ships Python 3.12.  ffmpeg-free is provided by EPEL.
+  # AlmaLinux/RHEL 10 ships Python 3.12. EPEL's ffmpeg-free has no H.264
+  # decoder, so ffprobe cannot read ordinary MP4 video; use RPM Fusion's ffmpeg.
   : "${PYTHON_BIN:=python3}"
-  dnf install -y python3 python3-pip ffmpeg-free fail2ban curl aria2 nodejs git fuse-sshfs
+  dnf install -y epel-release
+  dnf install -y "https://mirrors.rpmfusion.org/free/el/rpmfusion-free-release-$(rpm -E %rhel).noarch.rpm"
+  if rpm -q ffmpeg-free >/dev/null 2>&1; then
+    dnf swap -y ffmpeg-free ffmpeg --allowerasing
+  fi
+  dnf install -y --allowerasing python3 python3-pip ffmpeg fail2ban curl aria2 nodejs git fuse-sshfs
 else
   echo "Error: neither apt-get nor dnf is available."
   exit 1

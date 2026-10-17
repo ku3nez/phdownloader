@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import builtins
 
 from asr_routing import DEFAULT_WHISPER_MODEL, asr_engine_for_language, normalize_language, normalize_whisper_model
-from media_urls import is_youtube_url, pornhub_domain
+from media_urls import is_threads_url, is_youtube_url, pornhub_domain
 
 def safe_print(*args, **kwargs):
     try:
@@ -577,6 +577,23 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             'preferredquality': '128',
         }]
         ydl_opts['outtmpl'] = os.path.join(output_path, '%(title)s_audio.%(ext)s')
+
+    if is_threads_url(url):
+        # yt-dlp has no Threads extractor: read the post ourselves and hand
+        # yt-dlp the direct MP4 link with the post's title.
+        from threads_extractor import resolve_threads_post
+        post = resolve_threads_post(url, proxy=proxy)
+        if len(post['video_urls']) > 1 and progress_callback:
+            progress_callback({'type': 'status', 'msg': f"Threads post has {len(post['video_urls'])} videos; downloading the first one."})
+        if progress_callback:
+            progress_callback({'type': 'status', 'msg': f"[threads] {post['code']}: found video, title: {post['title']}"})
+        url = post['video_urls'][0]
+        literal_title = post['title'].replace('%', '%%')
+        ydl_opts['outtmpl'] = ydl_opts['outtmpl'].replace('%(title)s', literal_title)
+        # A direct file has one format without height metadata, so the usual
+        # height filters would reject it.
+        ydl_opts['format'] = 'bestaudio/best' if media_type in ('audio', 'transcript') else 'best'
+        ydl_opts['http_headers']['Referer'] = 'https://www.threads.com/'
 
     info = None
     ydl_instance = None

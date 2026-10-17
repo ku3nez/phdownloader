@@ -32,3 +32,11 @@ YOUTUBE_DOMAINS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
 def is_youtube_url(url: str | None) -> bool:
     hostname = url_hostname(url)
     return any(hostname == domain or hostname.endswith("." + domain) for domain in YOUTUBE_DOMAINS)
+
+
+THREADS_DOMAINS = ("threads.net", "threads.com")
+
+
+def is_threads_url(url: str | None) -> bool:
+    hostname = url_hostname(url)
+    return any(hostname == domain or hostname.endswith("." + domain) for domain in THREADS_DOMAINS)
