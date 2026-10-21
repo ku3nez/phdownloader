@@ -1280,6 +1280,7 @@
                     formData.append('structured', structured);
                     formData.append('model_size', modelSize);
                     formData.append('language', language);
+                    formData.append('ui_language', isRussian ? 'ru' : 'en');
                     formData.append('diarize', diarize);
                     formData.append('num_speakers', speakerCountValue);
                     formData.append('server_only', saveOnServer);
@@ -1299,6 +1300,7 @@
                             structured: structured,
                             model_size: modelSize,
                             language: language,
+                            ui_language: isRussian ? 'ru' : 'en',
                             diarize: diarize,
                             num_speakers: speakerCountValue,
                             server_only: saveOnServer,
@@ -1553,7 +1555,12 @@
                     </div>`;
                 statusArea.insertBefore(panel, document.getElementById('message'));
                 panel.querySelectorAll('input[data-speaker]').forEach(input => {
-                    input.addEventListener('input', () => { input.dataset.touched = '1'; });
+                    input.addEventListener('input', () => {
+                        input.dataset.touched = '1';
+                        // The quote explains a suggested name; hide it once the name is cleared.
+                        const evidence = panel.querySelector(`[data-evidence="${input.dataset.speaker}"]`);
+                        if (evidence) evidence.style.display = input.value.trim() ? '' : 'none';
+                    });
                 });
                 document.getElementById('speakerApplyBtn').addEventListener('click', () => applySpeakerNames(taskId, data.server_only));
             }

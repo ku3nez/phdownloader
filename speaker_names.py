@@ -59,7 +59,10 @@ def _russian_name_at(tokens, index):
     word = tokens[index]
     if not word[:1].isupper() or not re.match(r"[А-ЯЁ]", word):
         return None
-    parses = [p for p in _analyzer().parse(word) if "Name" in p.tag and p.score >= 0.05]
+    # Only whole dictionary words: pymorphy3 otherwise guesses from parts,
+    # e.g. "Антинейтрины" = prefix "анти" + a female name "Нейтрина".
+    parses = [p for p in _analyzer().parse(word)
+              if "Name" in p.tag and p.score >= 0.05 and len(p.methods_stack) == 1]
     if not parses:
         return None
     best = parses[0]
@@ -91,7 +94,7 @@ def _english_name_at(tokens, index):
 
 
 def find_mentions(text):
-    """[(name, role)] for every name occurrence in one line."""
+    """[(name, role, nominative)] for every name occurrence in one line."""
     tokens = TOKEN_RE.findall(text)
     mentions = []
     index = 0
@@ -119,9 +122,23 @@ def find_mentions(text):
                 role = "addressee"
         elif nominative and prev_word in GREETINGS and set_off_after:
             role = "addressee"
-        mentions.append((name, role))
+        mentions.append((name, role, nominative))
         index = end
     return mentions
+
+
+GREETING_START_RE = re.compile(
+    r"^\W*(?:здравствуй|привет|добр(?:ый|ое|ого)|рад |спасибо|благодарю|hello|hi\b|hey\b|thanks|thank you|good (?:morning|evening|afternoon))",
+    re.I)
+
+
+def _answered_with_greeting(lines, index):
+    """The next other speaker starts with a greeting: the name was an introduction."""
+    speaker = lines[index]["speaker"]
+    for j in range(index + 1, min(len(lines), index + 3)):
+        if lines[j]["speaker"] != speaker:
+            return bool(GREETING_START_RE.search(lines[j]["text"]))
+    return False
 
 
 def _stem(name):
@@ -149,7 +166,11 @@ def suggest_names(raw_text):
     lines = parse_lines(raw_text)
     votes, forms, evidence = {}, {}, {}
     for index, line in enumerate(lines):
-        for name, role in find_mentions(line["text"]):
+        for name, role, nominative in find_mentions(line["text"]):
+            # "Есть такие люди? — Дмитрий Сергеевич Горбунов." answered by
+            # "Здравствуйте" introduces the next speaker.
+            if role == "mentioned" and nominative and _answered_with_greeting(lines, index):
+                role = "introduced"
             if role not in ROLE_WEIGHTS:
                 continue
             owner = _owner(lines, index, role)

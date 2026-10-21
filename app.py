@@ -329,6 +329,14 @@ def start_download():
 
     publish_to_telegram = bool(publish_to_telegram)
     model_size = normalize_whisper_model(model_size)
+    # The page reports its own interface language so labels written by the
+    # worker ("Спикер"/"Speaker") match the page; otherwise use the browser's
+    # first preferred language.
+    ui_language = str((request.json if request.is_json else request.form).get("ui_language") or "").lower()
+    if ui_language:
+        is_russian = ui_language.startswith("ru")
+    else:
+        is_russian = request.headers.get("Accept-Language", "").strip().lower().startswith("ru")
     language = normalize_language(language)
     diarize = bool(diarize) and download_type == "transcript"
     try:
@@ -364,7 +372,7 @@ def start_download():
         "error": None,
         "details": {},
         "server_only": server_only,
-        "is_russian": "ru" in request.headers.get("Accept-Language", "").lower(),
+        "is_russian": is_russian,
         "structured": structured,
         "model_size": model_size,
         "language": language,
