@@ -32,6 +32,12 @@ RELATIONS = {
     "дедушка", "бабушка", "бабуля", "дядя", "тётя", "тетя", "начальник", "шеф", "директор", "сосед", "соседка", "учитель",
     "профессор", "доктор", "brother", "sister", "mother", "father", "friend", "colleague", "wife", "husband",
 }
+SECOND_PERSON = {
+    "ты", "вы", "тебя", "вас", "тебе", "вам", "тобой", "вами", "твой", "твоя", "твоё", "твое", "твои", "твоего", "твоей",
+    "ваш", "ваша", "ваше", "ваши", "вашего", "вашей", "you", "your", "yours",
+}
+FILLERS = {"а", "ну", "да", "нет", "вот", "ой", "э", "ага", "угу", "так", "и", "же", "ли", "оу", "ах", "эх", "oh", "yes", "no", "well"}
+SENTENCE_END = {".", "!", "?", "…"}
 EN_STOP = {"I", "The", "And", "But", "So", "Yes", "No", "Okay", "OK", "Well", "Oh", "Thanks", "Thank", "Hello", "Hi"}
 
 _morph = None
@@ -68,6 +74,7 @@ def _russian_name_at(tokens, index):
     best = parses[0]
     nominative = any("nomn" in p.tag for p in parses if p.score >= 0.2) or "nomn" in best.tag
     first = best.inflect({"nomn"}) or best
+    gender = "femn" if "femn" in best.tag else "masc"
     name = [first.word.capitalize()]
     end = index + 1
     # Optional patronymic and surname in the same case.
@@ -75,7 +82,9 @@ def _russian_name_at(tokens, index):
         extra = [p for p in _analyzer().parse(tokens[end]) if ("Patr" in p.tag or "Surn" in p.tag) and p.score >= 0.1]
         if not extra:
             break
-        form = extra[0].inflect({"nomn"}) or extra[0]
+        # Keep the first name's gender: "Катя Калашникова", not "Калашников".
+        extra.sort(key=lambda p: gender not in p.tag)
+        form = extra[0].inflect({"nomn", gender}) or extra[0].inflect({"nomn"}) or extra[0]
         name.append(form.word.capitalize())
         end += 1
     return " ".join(name), nominative, end
@@ -93,13 +102,45 @@ def _english_name_at(tokens, index):
     return " ".join(name), True, end
 
 
+def _addresses_listener(tokens, start, end):
+    """The sentence around tokens[start:end] speaks to someone.
+
+    A Russian address needs more than the bare name ("Бенедикт?", "Жанна, да,
+    правильно" are answers, not addresses) and a question or a word aimed at
+    the listener: ты/вы forms, or a verb in the 2nd person or imperative.
+    """
+    left = start
+    while left > 0 and tokens[left - 1] not in SENTENCE_END:
+        left -= 1
+    right = end
+    while right < len(tokens) and tokens[right] not in SENTENCE_END:
+        right += 1
+    words = [w.lower() for w in tokens[left:start] + tokens[end:right] if w[:1].isalpha()]
+    content = [w for w in words if w not in FILLERS]
+    if len(content) < 2:
+        return False
+    if right < len(tokens) and tokens[right] == "?":
+        return True
+    if any(w in SECOND_PERSON for w in words):
+        return True
+    for word in words:
+        for parse in _analyzer().parse(word)[:2]:
+            if "VERB" in parse.tag and ("2per" in parse.tag or "impr" in parse.tag) and parse.score >= 0.3:
+                return True
+    return False
+
+
 def find_mentions(text):
-    """[(name, role, nominative)] for every name occurrence in one line."""
+    """[(name, role, nominative, words_after)] for every name occurrence in one line."""
     tokens = TOKEN_RE.findall(text)
+    cyrillic = bool(re.search(r"[А-Яа-яЁё]", text))
     mentions = []
     index = 0
     while index < len(tokens):
-        found = _russian_name_at(tokens, index) or _english_name_at(tokens, index)
+        # In Russian speech Latin words are band, film or brand names
+        # ("Смотри, Sleepknot, …"), so English names are looked for only in
+        # English text.
+        found = _russian_name_at(tokens, index) or (None if cyrillic else _english_name_at(tokens, index))
         if not found:
             index += 1
             continue
@@ -117,18 +158,21 @@ def find_mentions(text):
             role = "self"
         elif nominative and INTRO_BEFORE_RE.search(before):
             role = "introduced"
-        elif nominative and set_off_before and set_off_after and prev_word not in RELATIONS:
-            if not (sentence_start and next_token in {".", ""}):  # a one-word sentence "Олег." is not an address
-                role = "addressee"
         elif nominative and prev_word in GREETINGS and set_off_after:
             role = "addressee"
-        mentions.append((name, role, nominative))
+        elif (nominative and set_off_before and set_off_after and prev_word not in RELATIONS
+              and _addresses_listener(tokens, index, end)):
+            role = "addressee"
+        mentions.append((name, role, nominative, sum(1 for t in tokens[end:] if t[:1].isalpha())))
         index = end
     return mentions
 
 
-GREETING_START_RE = re.compile(
-    r"^\W*(?:здравствуй|привет|добр(?:ый|ое|ого)|рад |спасибо|благодарю|hello|hi\b|hey\b|thanks|thank you|good (?:morning|evening|afternoon))",
+# A real greeting near the start of the reply ("Спасибо. Всем привет." counts);
+# thanks alone only closes a remark and does not mark an introduction.
+GREETING_RE = re.compile(
+    r"здравствуй|привет|добр(?:ый|ое|ого) (?:день|вечер|утро|дня|вечера)|доброе утро|рада? (?:быть|видеть|приветствовать)|"
+    r"\bhello\b|\bhi\b|\bhey\b|good (?:morning|evening|afternoon)|nice to (?:meet|be)",
     re.I)
 
 
@@ -137,7 +181,7 @@ def _answered_with_greeting(lines, index):
     speaker = lines[index]["speaker"]
     for j in range(index + 1, min(len(lines), index + 3)):
         if lines[j]["speaker"] != speaker:
-            return bool(GREETING_START_RE.search(lines[j]["text"]))
+            return bool(GREETING_RE.search(lines[j]["text"][:60]))
     return False
 
 
@@ -166,10 +210,11 @@ def suggest_names(raw_text):
     lines = parse_lines(raw_text)
     votes, forms, evidence = {}, {}, {}
     for index, line in enumerate(lines):
-        for name, role, nominative in find_mentions(line["text"]):
+        for name, role, nominative, words_after in find_mentions(line["text"]):
             # "Есть такие люди? — Дмитрий Сергеевич Горбунов." answered by
-            # "Здравствуйте" introduces the next speaker.
-            if role == "mentioned" and nominative and _answered_with_greeting(lines, index):
+            # "Здравствуйте" introduces the next speaker; the name has to close
+            # the line, or any name in a long reply would count.
+            if role == "mentioned" and nominative and words_after <= 6 and _answered_with_greeting(lines, index):
                 role = "introduced"
             if role not in ROLE_WEIGHTS:
                 continue
@@ -185,7 +230,9 @@ def suggest_names(raw_text):
     best = {}
     for key, by_speaker in votes.items():
         ranked = sorted(by_speaker.items(), key=lambda item: -item[1])
-        if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
+        # With three or more people an address can be ambiguous; take the
+        # name only if one speaker clearly collects most of its votes.
+        if len(ranked) > 1 and ranked[0][1] < 1.5 * ranked[1][1]:
             continue
         speaker, score = ranked[0]
         if score > best.get(speaker, (None, 0))[1]:
