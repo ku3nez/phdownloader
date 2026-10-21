@@ -71,8 +71,11 @@ def _russian_name_at(tokens, index):
               if "Name" in p.tag and p.score >= 0.05 and len(p.methods_stack) == 1]
     if not parses:
         return None
-    best = parses[0]
-    nominative = any("nomn" in p.tag for p in parses if p.score >= 0.2) or "nomn" in best.tag
+    # "Юлиана" is both the nominative of a female name and the genitive of
+    # "Юлиан": prefer a nominative reading when there is one.
+    nominative_parses = [p for p in parses if "nomn" in p.tag and p.score >= 0.2]
+    best = nominative_parses[0] if nominative_parses else parses[0]
+    nominative = bool(nominative_parses) or "nomn" in best.tag
     first = best.inflect({"nomn"}) or best
     gender = "femn" if "femn" in best.tag else "masc"
     name = [first.word.capitalize()]
@@ -117,7 +120,7 @@ def _addresses_listener(tokens, start, end):
         right += 1
     words = [w.lower() for w in tokens[left:start] + tokens[end:right] if w[:1].isalpha()]
     content = [w for w in words if w not in FILLERS]
-    if len(content) < 2:
+    if not content:
         return False
     if right < len(tokens) and tokens[right] == "?":
         return True
@@ -237,4 +240,18 @@ def suggest_names(raw_text):
         speaker, score = ranked[0]
         if score > best.get(speaker, (None, 0))[1]:
             best[speaker] = (key, score)
-    return [{"id": s, "name": forms[k], "evidence": evidence[(k, s)]} for s, (k, _) in sorted(best.items())]
+    # Colloquial address drops the ending ("Юлиан, общий чатик" for Юлиана);
+    # use the full form when it occurs elsewhere in the conversation.
+    full_forms = {}
+    for line in lines:
+        for name, _, _, _ in find_mentions(line["text"]):
+            first = name.split()[0]
+            full_forms[first.lower()] = first
+    def display(name):
+        parts = name.split()
+        for ending in ("а", "я"):
+            longer = full_forms.get((parts[0] + ending).lower())
+            if longer:
+                return " ".join([longer] + parts[1:])
+        return name
+    return [{"id": s, "name": display(forms[k]), "evidence": evidence[(k, s)]} for s, (k, _) in sorted(best.items())]

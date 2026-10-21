@@ -261,25 +261,11 @@ def publish_telegram_video(task_id: str, file_path: str) -> None:
 
 
 def write_final_transcript(output_path: str, segments: list[dict[str, Any]], structured: bool) -> None:
+    """Plain transcript in paragraphs (one timestamp per paragraph when structured)."""
+    from diarization import build_plain_paragraphs
+
     with open(output_path, "w", encoding="utf-8") as handle:
-        if structured:
-            for segment in segments:
-                text = str(segment.get("text", "")).strip()
-                if not text:
-                    continue
-                handle.write(f"[{format_timestamp(float(segment.get('start', 0) or 0))}] {text}\n")
-                if text.endswith((".", "!", "?")):
-                    handle.write("\n")
-        else:
-            first = True
-            for segment in segments:
-                text = str(segment.get("text", "")).strip()
-                if not text:
-                    continue
-                if not first:
-                    handle.write(" ")
-                handle.write(text)
-                first = False
+        handle.write(build_plain_paragraphs(segments, structured))
 
 
 def speaker_settings(task: dict) -> tuple[bool, int | None]:
@@ -429,12 +415,16 @@ def run_single_transcription(task_id: str, file_path: str, structured: bool, mod
         progress_callback=lambda info: update_from_callback(task_id, info),
         check_cancel=lambda: check_cancel(task_id),
         language=language,
-        return_segments=diarize,
+        return_segments=True,
         diarize=diarize,
         embeddings_path=embeddings_path,
     )
     if diarize:
         write_speaker_transcript(task_id, task, transcript_path, segments, [(0.0, embeddings_path)], structured)
+    else:
+        # The streaming output has one line per recognised phrase; rewrite it
+        # as paragraphs.
+        write_final_transcript(transcript_path, segments, structured)
     final_path = transcript_path
     if server_only:
         server_path = os.path.join(os.path.dirname(transcript_path), "[SERVER] " + os.path.basename(transcript_path))

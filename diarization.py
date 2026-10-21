@@ -27,7 +27,25 @@ MAX_CLUSTER_WINDOWS = 3000
 # similar windows; at most this many speakers are detected automatically.
 PRUNE_FRACTION = 0.1
 MAX_SPEAKERS = 10
+# Without a given count the windows are first split into OVERCLUSTER_K groups,
+# then groups whose average voices are closer than MERGE_SIMILARITY (cosine)
+# are joined. On a 1.5-hour meeting with about ten people the eigengap found
+# only 5 voices (all women in one), while this gave 10 at thresholds 0.6-0.8.
+OVERCLUSTER_K = int(os.getenv("DIARIZATION_OVERCLUSTER_K", "12"))
+MERGE_SIMILARITY = float(os.getenv("DIARIZATION_MERGE_SIMILARITY", "0.7"))
+# With a given count, groups this similar are the same person split in two
+# (0.94 on that meeting, while different people stayed below 0.55).
+DUPLICATE_SIMILARITY = float(os.getenv("DIARIZATION_DUPLICATE_SIMILARITY", "0.8"))
+MIN_SPEAKER_SHARE = 0.01
+# Words of one phrase (no pause longer than this and no sentence end) share a
+# speaker, so the label cannot change mid-sentence.
+PHRASE_GAP_SECONDS = 1.0
 SAMPLE_RATE = 16000
+
+
+SENTENCE_END = re.compile(r"[.!?…]$")
+# Hesitation sounds: "э", "э-э", "а-а", "м-м", "эм", "хм" (a plain "а" is a word).
+FILLER_RE = re.compile(r"^(?:э+|э-э+|а-а+|аа+|м+|м-м+|э?мм+|эм+|хм+|uh+|um+|erm+)[,.!?…]*$", re.I)
 
 
 def speaker_label(number, russian=True):
@@ -171,6 +189,20 @@ def _spectral_labels(vectors, num_speakers=None, max_speakers=MAX_SPEAKERS):
     return labels
 
 
+def _merge_similar(vectors, labels, min_similarity):
+    """Join groups whose mean voices are more similar than min_similarity."""
+    from scipy.cluster.hierarchy import fcluster, linkage
+
+    ids = list(np.unique(labels))
+    if len(ids) < 2:
+        return labels
+    centroids = np.array([vectors[labels == i].mean(axis=0) for i in ids])
+    centroids /= np.maximum(np.linalg.norm(centroids, axis=1, keepdims=True), 1e-9)
+    groups = fcluster(linkage(centroids, method="average", metric="cosine"), t=1 - min_similarity, criterion="distance")
+    mapping = {ids[j]: int(groups[j]) for j in range(len(ids))}
+    return np.array([mapping[label] for label in labels])
+
+
 def cluster_speakers(embeddings, num_speakers=None, threshold=CLUSTER_THRESHOLD):
     """Speaker number (1..K, by first appearance) for every window."""
     from scipy.cluster.hierarchy import fcluster, linkage
@@ -183,7 +215,13 @@ def cluster_speakers(embeddings, num_speakers=None, threshold=CLUSTER_THRESHOLD)
     vectors = embeddings / np.maximum(np.linalg.norm(embeddings, axis=1, keepdims=True), 1e-9)
     sample = np.linspace(0, count - 1, min(count, MAX_CLUSTER_WINDOWS)).astype(int)
     if len(sample) >= 40:
-        labels = _spectral_labels(vectors[sample], num_speakers)
+        if num_speakers:
+            labels = _spectral_labels(vectors[sample], num_speakers)
+            labels = _merge_similar(vectors[sample], labels, DUPLICATE_SIMILARITY)
+        else:
+            k_over = max(2, min(OVERCLUSTER_K, len(sample) // 30))
+            labels = _spectral_labels(vectors[sample], k_over)
+            labels = _merge_similar(vectors[sample], labels, MERGE_SIMILARITY)
     else:
         # Too few windows for a meaningful graph: plain hierarchical clustering.
         tree = linkage(vectors[sample], method="average", metric="cosine")
@@ -195,7 +233,7 @@ def cluster_speakers(embeddings, num_speakers=None, threshold=CLUSTER_THRESHOLD)
     sizes = np.array([(labels == k).sum() for k in groups])
     if not num_speakers:
         # A handful of windows (coughs, laughter, music) is not a speaker.
-        keep = sizes >= max(2, int(0.02 * len(sample)))
+        keep = sizes >= max(2, int(MIN_SPEAKER_SHARE * len(sample)))
         if not keep.any():
             keep = sizes == sizes.max()
         groups = [k for k, kept in zip(groups, keep) if kept]
@@ -217,6 +255,15 @@ def segment_words(segment):
     return [{"t": float(segment.get("start", 0) or 0), "w": text}] if text else []
 
 
+def _majority(result, indexes):
+    counts = {}
+    for i in indexes:
+        counts[result[i]] = counts.get(result[i], 0) + 1
+    winner = max(counts, key=counts.get)
+    for i in indexes:
+        result[i] = winner
+
+
 def assign_speakers(words, windows, labels):
     if not len(windows):
         return [1] * len(words)
@@ -229,6 +276,20 @@ def assign_speakers(words, windows, labels):
         candidates = [i for i in (position - 1, position) if 0 <= i < len(centers)]
         nearest = min(candidates, key=lambda i: abs(centers[i] - word["t"]))
         result.append(int(labels[nearest]))
+    # Speaker turns change at pauses or sentence ends: give every phrase the
+    # speaker of most of its words ("Спикер 4: потому что у Билайна /
+    # Спикер 6: проблемы с отчётами" was one sentence).
+    phrase = []
+    for i, word in enumerate(words):
+        if phrase:
+            previous = words[i - 1]
+            if (word.get("seg") != previous.get("seg") or word["t"] - previous["t"] > PHRASE_GAP_SECONDS
+                    or SENTENCE_END.search(str(previous["w"]))):
+                _majority(result, phrase)
+                phrase = []
+        phrase.append(i)
+    if phrase:
+        _majority(result, phrase)
     # A single word between two words of the same speaker is almost always a
     # boundary artefact of the 1.5 s windows.
     for i in range(1, len(result) - 1):
@@ -237,50 +298,89 @@ def assign_speakers(words, windows, labels):
     return result
 
 
-SENTENCE_END = re.compile(r"[.!?…]$")
+# Paragraphs: a new one starts on a speaker change, after a pause longer than
+# PARAGRAPH_PAUSE seconds, or at the first sentence end past PARAGRAPH_CHARS.
+PARAGRAPH_PAUSE = 2.0
+PARAGRAPH_CHARS = 600
+PARAGRAPH_HARD_CHARS = 1200
+BACKCHANNEL_WORDS = {
+    "угу", "ага", "да", "ну", "ясно", "понятно", "хорошо", "окей", "ок", "конечно", "так", "точно", "верно", "правильно",
+    "ммм", "мм", "yes", "yeah", "ok", "okay", "right", "sure", "mhm",
+}
 
 
-def build_lines(words, speakers, structured, russian=True, max_line_chars=350):
-    """Return transcript text with a speaker label on every line or paragraph."""
-    out = []
+def _is_backchannel(text):
+    words = re.findall(r"\w+", text.lower())
+    return 0 < len(words) <= 3 and all(w in BACKCHANNEL_WORDS for w in words)
+
+
+def _paragraphs(units, speaker_aware):
+    """units: [{"t", "text", "speaker"}] in time order -> paragraphs."""
+    paragraphs = []
     current = None
     previous_time = None
-    for word, speaker in zip(words, speakers):
-        text = str(word["w"]).strip()
-        new_line = (
+    for unit in units:
+        text = unit["text"].strip()
+        if not text:
+            continue
+        pause = unit["t"] - previous_time if previous_time is not None else 0.0
+        start_new = (
             current is None
-            or speaker != current["speaker"]
-            or (structured and SENTENCE_END.search(current["text"]) and (
-                len(current["text"]) > max_line_chars or (previous_time is not None and word["t"] - previous_time > 1.5)))
+            or (speaker_aware and unit["speaker"] != current["speaker"])
+            or (pause > PARAGRAPH_PAUSE and len(current["text"]) >= 120)
+            or (len(current["text"]) >= PARAGRAPH_CHARS and SENTENCE_END.search(current["text"]))
+            or len(current["text"]) >= PARAGRAPH_HARD_CHARS
         )
-        if new_line:
-            current = {"speaker": speaker, "start": word["t"], "text": text}
-            out.append(current)
+        if start_new:
+            current = {"speaker": unit.get("speaker"), "start": unit["t"], "text": text}
+            paragraphs.append(current)
         else:
             current["text"] += " " + text
-        previous_time = word["t"]
-    blocks = []
-    last_speaker = None
-    for line in out:
-        label = speaker_label(line["speaker"], russian)
-        if structured:
-            if last_speaker is not None and line["speaker"] != last_speaker:
-                blocks.append("")
-            blocks.append(f"[{format_timestamp(line['start'])}] {label}: {line['text']}")
-        else:
-            if last_speaker == line["speaker"] and blocks:
-                blocks[-1] += " " + line["text"]
+        previous_time = unit["t"]
+    if speaker_aware:
+        # "Угу" / "Да" from someone else in the middle of a monologue would
+        # split it into two paragraphs; join the monologue back together.
+        merged = []
+        for paragraph in paragraphs:
+            if (len(merged) >= 2 and merged[-2]["speaker"] == paragraph["speaker"]
+                    and _is_backchannel(merged[-1]["text"])):
+                merged.pop()
+                merged[-1]["text"] += " " + paragraph["text"]
             else:
-                blocks.append(f"{label}: {line['text']}")
-        last_speaker = line["speaker"]
-    return ("\n" if structured else "\n\n").join(blocks) + "\n"
+                merged.append(paragraph)
+        paragraphs = merged
+    return paragraphs
+
+
+def build_lines(words, speakers, structured, russian=True):
+    """Transcript text with a speaker label on every paragraph."""
+    units = [{"t": w["t"], "text": str(w["w"]), "speaker": s} for w, s in zip(words, speakers)]
+    blocks = []
+    for paragraph in _paragraphs(units, speaker_aware=True):
+        label = speaker_label(paragraph["speaker"], russian)
+        prefix = f"[{format_timestamp(paragraph['start'])}] " if structured else ""
+        blocks.append(f"{prefix}{label}: {paragraph['text']}")
+    return "\n\n".join(blocks) + "\n"
+
+
+def build_plain_paragraphs(segments, structured):
+    """Transcript without speakers, in paragraphs instead of one line per phrase."""
+    units = [{"t": float(s.get("start", 0) or 0), "text": str(s.get("text", ""))} for s in segments]
+    paragraphs = _paragraphs(units, speaker_aware=False)
+    if structured:
+        return "\n\n".join(f"[{format_timestamp(p['start'])}] {p['text']}" for p in paragraphs) + "\n"
+    return "\n\n".join(p["text"] for p in paragraphs) + "\n"
 
 
 def diarize_transcript(segments, embedding_sources, output_path, structured, num_speakers=None, russian=True):
     """Write the speaker-labelled transcript; return the speaker summary."""
     windows, embeddings = load_embeddings(embedding_sources)
     labels = cluster_speakers(embeddings, num_speakers)
-    words = [word for segment in segments for word in segment_words(segment)]
+    words = []
+    for index, segment in enumerate(segments):
+        for word in segment_words(segment):
+            if not FILLER_RE.match(str(word["w"]).strip()):
+                words.append({"t": word["t"], "w": word["w"], "seg": index})
     words.sort(key=lambda w: w["t"])
     speakers = assign_speakers(words, windows, labels)
     with open(output_path, "w", encoding="utf-8") as handle:
