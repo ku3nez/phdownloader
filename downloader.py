@@ -352,6 +352,12 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
         return segments_data
     return output_path
 
+# YouTube adds AI-dubbed audio tracks (e.g. English over a Russian video) and a
+# plain bitrate filter can pick one of them. Prefer the original track, without
+# the dynamic-range-compressed (DRC) variant; other sites fall through.
+ORIGINAL_AUDIO = '[format_note*=original][format_id!*=drc]'
+
+
 def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None, metadata_callback=None, check_cancel=None):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -574,7 +580,10 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             audio_bitrate = '192' # Default
             
         # Prefer quality up to the selected bitrate to save bandwidth
-        ydl_opts['format'] = f'bestaudio[abr<={audio_bitrate}]/bestaudio[ext=m4a]/bestaudio/best[height<=360]/best'
+        ydl_opts['format'] = (
+            f'bestaudio[abr<={audio_bitrate}]{ORIGINAL_AUDIO}/bestaudio{ORIGINAL_AUDIO}/'
+            f'bestaudio[abr<={audio_bitrate}]/bestaudio[ext=m4a]/bestaudio/best[height<=360]/best'
+        )
         ydl_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -584,10 +593,15 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     else:
         # Format mapping for better control
         if quality == 'best':
-            format_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+            format_str = (
+                f'bestvideo[ext=mp4]+bestaudio[ext=m4a]{ORIGINAL_AUDIO}/bestvideo+bestaudio{ORIGINAL_AUDIO}/'
+                'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+            )
         else:
             # Prefer MP4 video + M4A audio so yt-dlp does not fall back to a low progressive format.
             format_str = (
+                f'bestvideo[ext=mp4][height<={quality}]+bestaudio[ext=m4a]{ORIGINAL_AUDIO}/'
+                f'bestvideo[height<={quality}]+bestaudio{ORIGINAL_AUDIO}/'
                 f'bestvideo[ext=mp4][height<={quality}]+bestaudio[ext=m4a]/'
                 f'bestvideo[height<={quality}]+bestaudio/'
                 f'best[ext=mp4][height<={quality}]/best[height<={quality}]'
@@ -608,7 +622,7 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     
     if media_type == 'transcript':
         # Prepare for whisper transcription - we need the audio; use low quality to save weight
-        ydl_opts['format'] = 'bestaudio[abr<=64]/bestaudio[ext=m4a]/bestaudio/best'
+        ydl_opts['format'] = f'bestaudio[abr<=64]{ORIGINAL_AUDIO}/bestaudio{ORIGINAL_AUDIO}/bestaudio[abr<=64]/bestaudio[ext=m4a]/bestaudio/best'
         ydl_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',

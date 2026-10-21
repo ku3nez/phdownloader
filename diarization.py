@@ -23,6 +23,10 @@ BATCH_SIZE = 16
 # Hierarchical clustering is quadratic in memory; longer recordings are
 # clustered on an even sample and the remaining windows join the nearest voice.
 MAX_CLUSTER_WINDOWS = 3000
+# Spectral clustering: each window keeps edges to this share of its most
+# similar windows; at most this many speakers are detected automatically.
+PRUNE_FRACTION = 0.1
+MAX_SPEAKERS = 10
 SAMPLE_RATE = 16000
 
 
@@ -132,6 +136,41 @@ def load_embeddings(sources):
     return windows[order], embeddings[order]
 
 
+def _spectral_labels(vectors, num_speakers=None, max_speakers=MAX_SPEAKERS):
+    """Spectral clustering on a pruned cosine-affinity graph.
+
+    Without a given count, the number of speakers is the position of the
+    largest gap between the smallest eigenvalues of the graph Laplacian.
+    Average-linkage clustering with a fixed threshold merged two clear voices
+    in an hour-long interview through chains of noisy windows (laughter,
+    cross-talk); the eigengap found 1, 2 and 6 speakers correctly on a
+    lecture, that interview and a round table.
+    """
+    from scipy.cluster.vq import kmeans2
+    from scipy.sparse.csgraph import laplacian
+
+    count = len(vectors)
+    similarity = np.clip(vectors @ vectors.T, 0.0, None)
+    keep = max(5, int(PRUNE_FRACTION * count))
+    pruned = np.zeros_like(similarity)
+    nearest = np.argpartition(-similarity, keep - 1, axis=1)[:, :keep]
+    rows = np.arange(count)[:, None]
+    pruned[rows, nearest] = similarity[rows, nearest]
+    pruned = (pruned + pruned.T) / 2
+    values, vectors_lap = np.linalg.eigh(laplacian(pruned, normed=True))
+    if num_speakers:
+        k = min(int(num_speakers), count)
+    else:
+        gaps = np.diff(values[:max_speakers + 1])
+        k = int(np.argmax(gaps)) + 1
+    if k <= 1:
+        return np.zeros(count, dtype=int)
+    spectral = vectors_lap[:, :k]
+    spectral = spectral / np.maximum(np.linalg.norm(spectral, axis=1, keepdims=True), 1e-9)
+    _, labels = kmeans2(spectral, k, minit="++", seed=0, iter=50)
+    return labels
+
+
 def cluster_speakers(embeddings, num_speakers=None, threshold=CLUSTER_THRESHOLD):
     """Speaker number (1..K, by first appearance) for every window."""
     from scipy.cluster.hierarchy import fcluster, linkage
@@ -143,11 +182,15 @@ def cluster_speakers(embeddings, num_speakers=None, threshold=CLUSTER_THRESHOLD)
         return np.ones(1, dtype=int)
     vectors = embeddings / np.maximum(np.linalg.norm(embeddings, axis=1, keepdims=True), 1e-9)
     sample = np.linspace(0, count - 1, min(count, MAX_CLUSTER_WINDOWS)).astype(int)
-    tree = linkage(vectors[sample], method="average", metric="cosine")
-    if num_speakers:
-        labels = fcluster(tree, t=min(int(num_speakers), len(sample)), criterion="maxclust")
+    if len(sample) >= 40:
+        labels = _spectral_labels(vectors[sample], num_speakers)
     else:
-        labels = fcluster(tree, t=threshold, criterion="distance")
+        # Too few windows for a meaningful graph: plain hierarchical clustering.
+        tree = linkage(vectors[sample], method="average", metric="cosine")
+        if num_speakers:
+            labels = fcluster(tree, t=min(int(num_speakers), len(sample)), criterion="maxclust")
+        else:
+            labels = fcluster(tree, t=threshold, criterion="distance")
     groups = [k for k in np.unique(labels)]
     sizes = np.array([(labels == k).sum() for k in groups])
     if not num_speakers:
