@@ -327,11 +327,20 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
         if diarize and embeddings_path:
             if isinstance(audio_samples, np.ndarray):
                 from diarization import compute_embeddings, save_embeddings
-                status("[Speakers] Extracting voice fingerprints...")
-                windows, embeddings = compute_embeddings(
-                    audio_samples, [(s['start'], s['end']) for s in segments_data], cpu_threads, check_cancel, status)
-                save_embeddings(embeddings_path, windows, embeddings)
-                status(f"[Speakers] Saved {len(windows)} voice fingerprints")
+                try:
+                    import segmentation
+                    status("[Speakers] Finding speaker turns...")
+                    result = segmentation.analyse(audio_samples, cpu_threads, check_cancel, status)
+                    segmentation.save(embeddings_path, result)
+                    status(f"[Speakers] Saved {len(result['embeddings'])} voice fingerprints")
+                except Exception as exc:
+                    if 'cancelled' in str(exc).lower():
+                        raise
+                    status(f"WARNING: speaker turn model failed ({exc}); using simple voice windows")
+                    windows, embeddings = compute_embeddings(
+                        audio_samples, [(s['start'], s['end']) for s in segments_data], cpu_threads, check_cancel, status)
+                    save_embeddings(embeddings_path, windows, embeddings)
+                    status(f"[Speakers] Saved {len(windows)} voice fingerprints")
             else:
                 status("WARNING: audio could not be decoded in memory; speaker separation skipped")
 

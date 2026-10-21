@@ -142,6 +142,8 @@ def load_embeddings(sources):
         if not path or not os.path.exists(path):
             continue
         with np.load(path) as data:
+            if "windows" not in data:
+                continue
             windows, embeddings = data["windows"], data["embeddings"]
         if len(windows):
             all_windows.append(windows.astype(np.float64) + float(offset))
@@ -264,18 +266,7 @@ def _majority(result, indexes):
         result[i] = winner
 
 
-def assign_speakers(words, windows, labels):
-    if not len(windows):
-        return [1] * len(words)
-    centers = windows.mean(axis=1)
-    order = np.argsort(centers)
-    centers, labels = centers[order], labels[order]
-    result = []
-    for word in words:
-        position = np.searchsorted(centers, word["t"])
-        candidates = [i for i in (position - 1, position) if 0 <= i < len(centers)]
-        nearest = min(candidates, key=lambda i: abs(centers[i] - word["t"]))
-        result.append(int(labels[nearest]))
+def _smooth_turns(words, result):
     # Speaker turns change at pauses or sentence ends: give every phrase the
     # speaker of most of its words ("Спикер 4: потому что у Билайна /
     # Спикер 6: проблемы с отчётами" was one sentence).
@@ -291,11 +282,52 @@ def assign_speakers(words, windows, labels):
     if phrase:
         _majority(result, phrase)
     # A single word between two words of the same speaker is almost always a
-    # boundary artefact of the 1.5 s windows.
+    # boundary artefact.
     for i in range(1, len(result) - 1):
         if result[i - 1] == result[i + 1] != result[i]:
             result[i] = result[i - 1]
     return result
+
+
+def _renumber(result):
+    """Speaker 1 is whoever speaks first, then 2, ..."""
+    mapping = {}
+    for speaker in result:
+        if speaker not in mapping:
+            mapping[speaker] = len(mapping) + 1
+    return [mapping[s] for s in result]
+
+
+def assign_speakers(words, windows, labels):
+    if not len(windows):
+        return [1] * len(words)
+    centers = windows.mean(axis=1)
+    order = np.argsort(centers)
+    centers, labels = centers[order], labels[order]
+    result = []
+    for word in words:
+        position = np.searchsorted(centers, word["t"])
+        candidates = [i for i in (position - 1, position) if 0 <= i < len(centers)]
+        nearest = min(candidates, key=lambda i: abs(centers[i] - word["t"]))
+        result.append(int(labels[nearest]))
+    return _smooth_turns(words, result)
+
+
+def assign_speakers_segmented(words, data, num_speakers=None):
+    """Speakers from pyannote segmentation: frame-level votes of all windows."""
+    import segmentation
+
+    labels = cluster_speakers(data["embeddings"], num_speakers)
+    scores = segmentation.speaker_timeline(data, labels)
+    result, last = [], None
+    for word in words:
+        # Word timestamps mark the word start; look slightly inside the word.
+        speaker = segmentation.speaker_at(scores, word["t"] + 0.15)
+        last = speaker if speaker is not None else last
+        result.append(last)
+    first = next((s for s in result if s is not None), 1)
+    result = [s if s is not None else first for s in result]
+    return _renumber(_smooth_turns(words, result))
 
 
 # Paragraphs: a new one starts on a speaker change, after a pause longer than
@@ -405,15 +437,24 @@ def build_plain_paragraphs(segments, structured):
 
 def diarize_transcript(segments, embedding_sources, output_path, structured, num_speakers=None, russian=True, remarks=False):
     """Write the speaker-labelled transcript; return the speaker summary."""
-    windows, embeddings = load_embeddings(embedding_sources)
-    labels = cluster_speakers(embeddings, num_speakers)
     words = []
     for index, segment in enumerate(segments):
         for word in segment_words(segment):
             if not FILLER_RE.match(str(word["w"]).strip()):
                 words.append({"t": word["t"], "w": word["w"], "seg": index})
     words.sort(key=lambda w: w["t"])
-    speakers = assign_speakers(words, windows, labels)
+    segmented = None
+    try:
+        import segmentation
+
+        segmented = segmentation.load(embedding_sources)
+    except Exception as exc:
+        print(f"Speaker segmentation data unusable, falling back to windows: {exc}")
+    if segmented is not None:
+        speakers = assign_speakers_segmented(words, segmented, num_speakers)
+    else:
+        windows, embeddings = load_embeddings(embedding_sources)
+        speakers = assign_speakers(words, windows, cluster_speakers(embeddings, num_speakers))
     with open(output_path, "w", encoding="utf-8") as handle:
         handle.write(build_lines(words, speakers, structured, russian, segments if remarks else None))
     counts = {}
