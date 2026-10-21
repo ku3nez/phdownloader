@@ -226,7 +226,9 @@ def cleanup_downloads() -> None:
                     if os.path.isdir(item_path) and os.path.exists(os.path.join(item_path, ".active")):
                         log_event("cleanup", f"skip task_id={item} because .active exists")
                         continue
-                    if now - os.path.getmtime(item_path) <= FILE_EXPIRATION_SECONDS:
+                    # Speaker-labelled transcripts wait for the user to name the speakers.
+                    expiration = max(FILE_EXPIRATION_SECONDS, 3600) if task and task.get("speakers") else FILE_EXPIRATION_SECONDS
+                    if now - os.path.getmtime(item_path) <= expiration:
                         continue
                     if os.path.isdir(item_path):
                         shutil.rmtree(item_path, ignore_errors=True)
@@ -308,6 +310,8 @@ def start_download():
         structured = request.json.get("structured", True)
         model_size = request.json.get("model_size", "small")
         language = request.json.get("language", "auto")
+        diarize = request.json.get("diarize", False)
+        num_speakers = request.json.get("num_speakers")
         server_only = request.json.get("server_only", False)
         publish_to_telegram = request.json.get("publish_to_telegram", False)
     else:
@@ -318,12 +322,21 @@ def start_download():
         structured = request.form.get("structured", "true").lower() == "true"
         model_size = request.form.get("model_size", "small")
         language = request.form.get("language", "auto")
+        diarize = request.form.get("diarize", "false").lower() == "true"
+        num_speakers = request.form.get("num_speakers")
         server_only = request.form.get("server_only", "false").lower() == "true"
         publish_to_telegram = request.form.get("publish_to_telegram", "false").lower() == "true"
 
     publish_to_telegram = bool(publish_to_telegram)
     model_size = normalize_whisper_model(model_size)
     language = normalize_language(language)
+    diarize = bool(diarize) and download_type == "transcript"
+    try:
+        num_speakers = int(num_speakers) if num_speakers not in (None, "") else None
+    except (TypeError, ValueError):
+        num_speakers = None
+    if num_speakers is not None and not 1 <= num_speakers <= 20:
+        num_speakers = None
     is_pornhub_video = is_pornhub_url(url) and download_type == "video"
     is_uploaded_video = is_uploaded_video_file(file) and download_type == "video"
     if publish_to_telegram and not (is_pornhub_video or is_uploaded_video):
@@ -355,6 +368,8 @@ def start_download():
         "structured": structured,
         "model_size": model_size,
         "language": language,
+        "diarize": diarize,
+        "num_speakers": num_speakers,
         "download_type": download_type,
         "url": url,
         "worker_node": None,
@@ -438,6 +453,34 @@ def cancel_task(task_id: str):
         return jsonify({"success": True})
     log_event("HTTP", f"POST /cancel/{task_id} -> 404 task not found")
     return jsonify({"error": "Task not found"}), 404
+
+
+@app.route("/speakers/<task_id>", methods=["POST"])
+def rename_task_speakers(task_id: str):
+    """Rewrite the transcript with the given speaker names."""
+    from diarization import rename_speakers
+
+    task = store.get_task(task_id)
+    if not task or task.get("status") != "completed" or not task.get("speaker_raw_path") or not task.get("filename"):
+        return jsonify({"error": "Transcript with speakers not found"}), 404
+    payload = request.get_json(silent=True) or {}
+    names = {}
+    for key, value in (payload.get("names") or {}).items():
+        name = " ".join(str(value or "").split())[:60]
+        if str(key).isdigit() and name:
+            names[int(key)] = name.replace(":", " ")
+    try:
+        with open(task["speaker_raw_path"], "r", encoding="utf-8") as handle:
+            raw = handle.read()
+        temp_path = task["filename"] + ".tmp"
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            handle.write(rename_speakers(raw, names))
+        os.replace(temp_path, task["filename"])
+    except OSError as exc:
+        return jsonify({"error": f"Could not update transcript: {exc}"}), 500
+    store.update_task(task_id, speaker_names={str(k): v for k, v in names.items()})
+    store.append_log(task_id, f"[{task_id}] Speaker names applied: {names}")
+    return jsonify({"success": True})
 
 
 @app.route("/get_file/<task_id>")

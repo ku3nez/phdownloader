@@ -109,6 +109,8 @@ def format_timestamp(seconds: float) -> str:
 
 def friendly_status(task: dict, raw_msg: str) -> str:
     is_ru = bool(task.get("is_russian"))
+    if "[Speakers]" in raw_msg:
+        return "Разделение по говорящим..." if is_ru else "Separating speakers..."
     if "Detecting language" in raw_msg:
         return "Определение языка..." if is_ru else "Detecting language..."
     if "Initializing" in raw_msg or "Whisper AI" in raw_msg:
@@ -280,6 +282,45 @@ def write_final_transcript(output_path: str, segments: list[dict[str, Any]], str
                 first = False
 
 
+def speaker_settings(task: dict) -> tuple[bool, int | None]:
+    raw = str(task.get("num_speakers") or "").strip()
+    return bool(task.get("diarize")), (int(raw) if raw.isdigit() and int(raw) > 0 else None)
+
+
+def chunk_embeddings_path(chunk: dict) -> str:
+    return str(chunk["segments_path"]).replace(".segments.json", ".speakers.npz")
+
+
+def write_speaker_transcript(task_id: str, task: dict, output_path: str, segments: list[dict[str, Any]], sources: list, structured: bool) -> None:
+    """Write the speaker-labelled transcript, or a plain one if that fails."""
+    _, num_speakers = speaker_settings(task)
+    store.update_task(task_id, current_status=friendly_status(task, "[Speakers]"))
+    try:
+        from diarization import diarize_transcript
+
+        speakers = diarize_transcript(segments, sources, output_path, structured, num_speakers, russian=bool(task.get("is_russian")))
+    except Exception as exc:
+        log_event(task_id, f"speaker separation failed, writing plain transcript: {exc}")
+        log_event(task_id, traceback.format_exc())
+        write_final_transcript(output_path, segments, structured)
+        return
+    # Renaming always starts from this copy, so names can be changed again.
+    raw_path = os.path.join(os.path.dirname(output_path), ".speakers_raw.txt")
+    shutil.copyfile(output_path, raw_path)
+    suggestions = []
+    try:
+        from speaker_names import suggest_names
+
+        with open(output_path, "r", encoding="utf-8") as handle:
+            suggestions = suggest_names(handle.read())
+    except Exception as exc:
+        log_event(task_id, f"speaker name suggestions failed: {exc}")
+    store.update_task(task_id, speakers=speakers, speaker_raw_path=raw_path, speaker_suggestions=suggestions)
+    log_event(task_id, "speakers " + ", ".join(f"{s['label']} {s['share']}%" for s in speakers))
+    if suggestions:
+        log_event(task_id, "speaker names from the text: " + ", ".join(f"{s['id']}={s['name']}" for s in suggestions))
+
+
 def split_audio_into_chunks(task_id: str, source_path: str, total_duration: float) -> list[dict[str, Any]]:
     chunks_dir = task_chunks_dir(task_id)
     parts_dir = task_parts_dir(task_id)
@@ -376,7 +417,10 @@ def run_single_transcription(task_id: str, file_path: str, structured: bool, mod
     language = resolve_task_language(task_id, file_path)
     transcript_path = distributed_output_path(task_id, file_path)
     log_event(task_id, f"single_transcription duration={duration}s transcript_path={transcript_path}")
-    transcribe_with_whisper(
+    task = store.get_task(task_id) or {}
+    diarize, _ = speaker_settings(task)
+    embeddings_path = os.path.join(os.path.dirname(transcript_path), ".speakers.npz") if diarize else None
+    segments = transcribe_with_whisper(
         audio_path=file_path,
         output_path=transcript_path,
         structured=structured,
@@ -385,7 +429,12 @@ def run_single_transcription(task_id: str, file_path: str, structured: bool, mod
         progress_callback=lambda info: update_from_callback(task_id, info),
         check_cancel=lambda: check_cancel(task_id),
         language=language,
+        return_segments=diarize,
+        diarize=diarize,
+        embeddings_path=embeddings_path,
     )
+    if diarize:
+        write_speaker_transcript(task_id, task, transcript_path, segments, [(0.0, embeddings_path)], structured)
     final_path = transcript_path
     if server_only:
         server_path = os.path.join(os.path.dirname(transcript_path), "[SERVER] " + os.path.basename(transcript_path))
@@ -456,17 +505,23 @@ def finalize_distributed_transcription(task_id: str) -> None:
             raise RuntimeError(f"Missing segments file for {chunk.get('chunk_id')}")
         with open(segments_path, "r", encoding="utf-8") as handle:
             rel_segments = json.load(handle)
+        offset = float(chunk.get("offset", 0) or 0)
         for segment in rel_segments:
-            all_segments.append(
-                {
-                    "start": float(chunk.get("offset", 0) or 0) + float(segment.get("start", 0) or 0),
-                    "end": float(chunk.get("offset", 0) or 0) + float(segment.get("end", 0) or 0),
-                    "text": str(segment.get("text", "")).strip(),
-                }
-            )
+            entry = {
+                "start": offset + float(segment.get("start", 0) or 0),
+                "end": offset + float(segment.get("end", 0) or 0),
+                "text": str(segment.get("text", "")).strip(),
+            }
+            if segment.get("words"):
+                entry["words"] = [{"t": offset + float(w["t"]), "w": w["w"]} for w in segment["words"]]
+            all_segments.append(entry)
 
     output_path = str(task.get("distributed_output_path") or distributed_output_path(task_id, str(task.get("source_file") or "result")))
-    write_final_transcript(output_path, all_segments, bool(task.get("structured", True)))
+    if task.get("diarize"):
+        sources = [(float(chunk.get("offset", 0) or 0), chunk_embeddings_path(chunk)) for chunk in chunks]
+        write_speaker_transcript(task_id, task, output_path, all_segments, sources, bool(task.get("structured", True)))
+    else:
+        write_final_transcript(output_path, all_segments, bool(task.get("structured", True)))
     final_path = output_path
     if task.get("server_only"):
         server_path = os.path.join(os.path.dirname(output_path), "[SERVER] " + os.path.basename(output_path))
@@ -573,6 +628,8 @@ def process_transcription_chunk(task_id: str, chunk_id: str) -> None:
             progress_callback=lambda info: update_chunk_from_callback(task_id, chunk_id, info),
             check_cancel=lambda: check_cancel(task_id),
             return_segments=True,
+            diarize=bool(parent_task.get("diarize")),
+            embeddings_path=chunk_embeddings_path(chunk) if parent_task.get("diarize") else None,
         )
         with open(str(chunk["segments_path"]), "w", encoding="utf-8") as handle:
             json.dump(segments, handle, ensure_ascii=False)

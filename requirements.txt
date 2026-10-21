@@ -6,6 +6,11 @@ python-dotenv
 faster-whisper
 # GigaAM (Russian) and Parakeet (European languages) on ONNX Runtime.
 onnx-asr[cpu,hub]
+# Speaker clustering for diarization.
+scipy
+# Russian morphology for inferring speaker names from the text.
+pymorphy3
+pymorphy3-dicts-ru
 # faster-whisper 1.2.1 calls av.open(metadata_errors=...), removed in PyAV 19.
 av<19
 redis

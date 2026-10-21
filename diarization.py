@@ -1,0 +1,263 @@
+"""Speaker diarization: who spoke when.
+
+Each recognition job extracts speaker embeddings ("voice fingerprints") on
+short sliding windows of its speech and saves them next to its segments. The
+final step clusters the windows of the whole recording at once, so speaker
+numbers stay consistent across chunks processed on different nodes, and then
+gives every recognised word the speaker of the nearest window.
+"""
+
+import os
+import re
+
+import numpy as np
+
+EMBEDDING_REPO = os.getenv("DIARIZATION_EMBEDDING_MODEL", "onnx-community/wespeaker-voxceleb-resnet34-LM")
+EMBEDDING_FILE = os.getenv("DIARIZATION_EMBEDDING_FILE", "onnx/model.onnx")
+# Cosine distance at which two groups of windows count as different voices.
+CLUSTER_THRESHOLD = float(os.getenv("DIARIZATION_THRESHOLD", "0.7"))
+WINDOW_SECONDS = 1.5
+HOP_SECONDS = 0.75
+MIN_WINDOW_SECONDS = 0.5
+BATCH_SIZE = 16
+# Hierarchical clustering is quadratic in memory; longer recordings are
+# clustered on an even sample and the remaining windows join the nearest voice.
+MAX_CLUSTER_WINDOWS = 3000
+SAMPLE_RATE = 16000
+
+
+def speaker_label(number, russian=True):
+    return f"{'Спикер' if russian else 'Speaker'} {number}"
+
+
+def format_timestamp(seconds):
+    total = max(0, int(seconds))
+    hours, minutes, secs = total // 3600, (total % 3600) // 60, total % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+
+def speech_windows(spans):
+    """Sliding windows over speech spans (seconds)."""
+    windows = []
+    for start, end in spans:
+        length = end - start
+        if length < MIN_WINDOW_SECONDS:
+            continue
+        if length <= WINDOW_SECONDS:
+            windows.append((start, end))
+            continue
+        position = start
+        while position + WINDOW_SECONDS < end:
+            windows.append((position, position + WINDOW_SECONDS))
+            position += HOP_SECONDS
+        windows.append((end - WINDOW_SECONDS, end))
+    return windows
+
+
+def _load_embedding_model(cpu_threads):
+    import onnxruntime as rt
+    from huggingface_hub import hf_hub_download
+    from onnx_asr.preprocessors.numpy_preprocessor import KaldiPreprocessorNumpy
+
+    options = rt.SessionOptions()
+    options.intra_op_num_threads = cpu_threads
+    options.inter_op_num_threads = 1
+    session = rt.InferenceSession(hf_hub_download(EMBEDDING_REPO, EMBEDDING_FILE), options, providers=["CPUExecutionProvider"])
+    return session, session.get_inputs()[0].name, KaldiPreprocessorNumpy("wespeaker")
+
+
+def compute_embeddings(audio, spans, cpu_threads=2, check_cancel=None, status=None):
+    """Return (windows [N,2], embeddings [N,D]) for speech spans of a 16 kHz signal."""
+    windows = speech_windows(spans)
+    if not windows:
+        return np.zeros((0, 2), dtype=np.float32), np.zeros((0, 0), dtype=np.float32)
+    session, input_name, preprocessor = _load_embedding_model(cpu_threads)
+
+    def embed(batch):
+        lengths = np.array([w.shape[0] for w in batch], dtype=np.int64)
+        features, _ = preprocessor(np.stack(batch).astype(np.float32), lengths)
+        features = features - features.mean(axis=1, keepdims=True)
+        return session.run(None, {input_name: features})[0]
+
+    embeddings = [None] * len(windows)
+    full = [i for i, (s, e) in enumerate(windows) if abs((e - s) - WINDOW_SECONDS) < 1e-6]
+    full_set = set(full)
+    short = [i for i in range(len(windows)) if i not in full_set]
+    done = 0
+    for begin in range(0, len(full), BATCH_SIZE):
+        ids = full[begin:begin + BATCH_SIZE]
+        batch = [audio[int(windows[i][0] * SAMPLE_RATE):int(windows[i][0] * SAMPLE_RATE) + int(WINDOW_SECONDS * SAMPLE_RATE)] for i in ids]
+        if any(len(w) != int(WINDOW_SECONDS * SAMPLE_RATE) for w in batch):
+            short.extend(ids)
+            continue
+        for i, vector in zip(ids, embed(batch)):
+            embeddings[i] = vector
+        done += len(ids)
+        if check_cancel and check_cancel():
+            raise Exception("Transcription cancelled during speaker analysis")
+        if status and begin % (BATCH_SIZE * 20) == 0:
+            status(f"[Speakers] Voice fingerprints: {done}/{len(windows)}")
+    for i in short:
+        start, end = windows[i]
+        segment = audio[int(start * SAMPLE_RATE):int(end * SAMPLE_RATE)]
+        if len(segment) < int(MIN_WINDOW_SECONDS * SAMPLE_RATE):
+            continue
+        embeddings[i] = embed([segment])[0]
+    keep = [i for i, vector in enumerate(embeddings) if vector is not None]
+    return (np.array([windows[i] for i in keep], dtype=np.float32),
+            np.array([embeddings[i] for i in keep], dtype=np.float32))
+
+
+def save_embeddings(path, windows, embeddings):
+    with open(path, "wb") as handle:
+        np.savez_compressed(handle, windows=windows.astype(np.float32), embeddings=embeddings.astype(np.float16))
+
+
+def load_embeddings(sources):
+    """Load (offset_seconds, path) pairs into one time-ordered set."""
+    all_windows, all_embeddings = [], []
+    for offset, path in sources:
+        if not path or not os.path.exists(path):
+            continue
+        with np.load(path) as data:
+            windows, embeddings = data["windows"], data["embeddings"]
+        if len(windows):
+            all_windows.append(windows.astype(np.float64) + float(offset))
+            all_embeddings.append(embeddings.astype(np.float32))
+    if not all_windows:
+        return np.zeros((0, 2)), np.zeros((0, 0), dtype=np.float32)
+    windows = np.concatenate(all_windows)
+    embeddings = np.concatenate(all_embeddings)
+    order = np.argsort(windows[:, 0], kind="stable")
+    return windows[order], embeddings[order]
+
+
+def cluster_speakers(embeddings, num_speakers=None, threshold=CLUSTER_THRESHOLD):
+    """Speaker number (1..K, by first appearance) for every window."""
+    from scipy.cluster.hierarchy import fcluster, linkage
+
+    count = len(embeddings)
+    if count == 0:
+        return np.zeros(0, dtype=int)
+    if count == 1:
+        return np.ones(1, dtype=int)
+    vectors = embeddings / np.maximum(np.linalg.norm(embeddings, axis=1, keepdims=True), 1e-9)
+    sample = np.linspace(0, count - 1, min(count, MAX_CLUSTER_WINDOWS)).astype(int)
+    tree = linkage(vectors[sample], method="average", metric="cosine")
+    if num_speakers:
+        labels = fcluster(tree, t=min(int(num_speakers), len(sample)), criterion="maxclust")
+    else:
+        labels = fcluster(tree, t=threshold, criterion="distance")
+    groups = [k for k in np.unique(labels)]
+    sizes = np.array([(labels == k).sum() for k in groups])
+    if not num_speakers:
+        # A handful of windows (coughs, laughter, music) is not a speaker.
+        keep = sizes >= max(2, int(0.02 * len(sample)))
+        if not keep.any():
+            keep = sizes == sizes.max()
+        groups = [k for k, kept in zip(groups, keep) if kept]
+    centroids = np.array([vectors[sample][labels == k].mean(axis=0) for k in groups])
+    centroids /= np.maximum(np.linalg.norm(centroids, axis=1, keepdims=True), 1e-9)
+    assigned = np.argmax(vectors @ centroids.T, axis=1)
+    numbering = {}
+    for group in assigned:
+        numbering.setdefault(int(group), len(numbering) + 1)
+    return np.array([numbering[int(group)] for group in assigned])
+
+
+def segment_words(segment):
+    """Words with absolute start times from a stored segment."""
+    words = segment.get("words")
+    if words:
+        return [w for w in words if str(w.get("w", "")).strip()]
+    text = str(segment.get("text", "")).strip()
+    return [{"t": float(segment.get("start", 0) or 0), "w": text}] if text else []
+
+
+def assign_speakers(words, windows, labels):
+    if not len(windows):
+        return [1] * len(words)
+    centers = windows.mean(axis=1)
+    order = np.argsort(centers)
+    centers, labels = centers[order], labels[order]
+    result = []
+    for word in words:
+        position = np.searchsorted(centers, word["t"])
+        candidates = [i for i in (position - 1, position) if 0 <= i < len(centers)]
+        nearest = min(candidates, key=lambda i: abs(centers[i] - word["t"]))
+        result.append(int(labels[nearest]))
+    # A single word between two words of the same speaker is almost always a
+    # boundary artefact of the 1.5 s windows.
+    for i in range(1, len(result) - 1):
+        if result[i - 1] == result[i + 1] != result[i]:
+            result[i] = result[i - 1]
+    return result
+
+
+SENTENCE_END = re.compile(r"[.!?…]$")
+
+
+def build_lines(words, speakers, structured, russian=True, max_line_chars=350):
+    """Return transcript text with a speaker label on every line or paragraph."""
+    out = []
+    current = None
+    previous_time = None
+    for word, speaker in zip(words, speakers):
+        text = str(word["w"]).strip()
+        new_line = (
+            current is None
+            or speaker != current["speaker"]
+            or (structured and SENTENCE_END.search(current["text"]) and (
+                len(current["text"]) > max_line_chars or (previous_time is not None and word["t"] - previous_time > 1.5)))
+        )
+        if new_line:
+            current = {"speaker": speaker, "start": word["t"], "text": text}
+            out.append(current)
+        else:
+            current["text"] += " " + text
+        previous_time = word["t"]
+    blocks = []
+    last_speaker = None
+    for line in out:
+        label = speaker_label(line["speaker"], russian)
+        if structured:
+            if last_speaker is not None and line["speaker"] != last_speaker:
+                blocks.append("")
+            blocks.append(f"[{format_timestamp(line['start'])}] {label}: {line['text']}")
+        else:
+            if last_speaker == line["speaker"] and blocks:
+                blocks[-1] += " " + line["text"]
+            else:
+                blocks.append(f"{label}: {line['text']}")
+        last_speaker = line["speaker"]
+    return ("\n" if structured else "\n\n").join(blocks) + "\n"
+
+
+def diarize_transcript(segments, embedding_sources, output_path, structured, num_speakers=None, russian=True):
+    """Write the speaker-labelled transcript; return the speaker summary."""
+    windows, embeddings = load_embeddings(embedding_sources)
+    labels = cluster_speakers(embeddings, num_speakers)
+    words = [word for segment in segments for word in segment_words(segment)]
+    words.sort(key=lambda w: w["t"])
+    speakers = assign_speakers(words, windows, labels)
+    with open(output_path, "w", encoding="utf-8") as handle:
+        handle.write(build_lines(words, speakers, structured, russian))
+    counts = {}
+    for speaker in speakers:
+        counts[speaker] = counts.get(speaker, 0) + 1
+    total = max(1, len(speakers))
+    return [
+        {"id": number, "label": speaker_label(number, russian), "share": round(100 * counts[number] / total)}
+        for number in sorted(counts)
+    ]
+
+
+LABEL_LINE = re.compile(r"^(\[[0-9:]+\] )?((?:Спикер|Speaker) (\d+)):", re.M)
+
+
+def rename_speakers(raw_text, names):
+    """Replace speaker labels at line starts with names ({number: name})."""
+    def replace(match):
+        name = names.get(int(match.group(3)))
+        return f"{match.group(1) or ''}{name or match.group(2)}:"
+    return LABEL_LINE.sub(replace, raw_text)

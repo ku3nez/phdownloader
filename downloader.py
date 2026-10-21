@@ -98,7 +98,7 @@ def detect_language(audio_path, max_seconds=300):
     return language, float(probability), [(code, float(prob)) for code, prob in candidates[:3]]
 
 
-def _onnx_asr_segments(engine, audio, cpu_threads):
+def _onnx_asr_segments(engine, audio, cpu_threads, timestamps=False):
     """Yield segments (start, end, text) from GigaAM or Parakeet via ONNX Runtime."""
     import onnx_asr
     import onnxruntime as rt
@@ -110,10 +110,34 @@ def _onnx_asr_segments(engine, audio, cpu_threads):
     vad = onnx_asr.load_vad('silero', sess_options=options)
     # batch_size=1: padding segments to a common length makes CPU inference
     # about three times slower than recognising them one by one.
-    return model.with_vad(vad, max_speech_duration_s=25, batch_size=1).recognize(audio, sample_rate=16000)
+    adapter = model.with_vad(vad, max_speech_duration_s=25, batch_size=1)
+    if timestamps:
+        adapter = adapter.with_timestamps()
+    return adapter.recognize(audio, sample_rate=16000)
 
 
-def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='small', total_duration=0, progress_callback=None, check_cancel=None, return_segments=False, language=None):
+def _segment_words(segment):
+    """Words with absolute start times, used to split speaker turns."""
+    words = getattr(segment, 'words', None)
+    if words:  # faster-whisper with word_timestamps
+        return [{'t': float(w.start), 'w': w.word.strip()} for w in words if w.word.strip()]
+    tokens = getattr(segment, 'tokens', None)
+    stamps = getattr(segment, 'timestamps', None)
+    if tokens and stamps and len(tokens) == len(stamps) and isinstance(tokens[0], str):
+        # onnx-asr: sub-word tokens, a leading space starts a word; times
+        # are relative to the segment.
+        result = []
+        for token, stamp in zip(tokens, stamps):
+            if not result or token.startswith(' '):
+                result.append({'t': float(segment.start) + float(stamp), 'w': token.strip()})
+            else:
+                result[-1]['w'] += token
+        return [w for w in result if w['w']]
+    text = (segment.text or '').strip()
+    return [{'t': float(segment.start), 'w': text}] if text else []
+
+
+def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='small', total_duration=0, progress_callback=None, check_cancel=None, return_segments=False, language=None, diarize=False, embeddings_path=None):
     """Transcribe an audio file.
 
     Russian goes to GigaAM, Parakeet's European languages to Parakeet and
@@ -190,7 +214,7 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
         if engine != 'whisper':
             try:
                 status(f"Initializing ASR model: engine={engine}, model={ASR_ONNX_MODELS[engine]}, language={language}, threads={cpu_threads}")
-                segments = _onnx_asr_segments(engine, audio_samples, cpu_threads)
+                segments = _onnx_asr_segments(engine, audio_samples, cpu_threads, timestamps=diarize)
             except Exception as e:
                 status(f"WARNING: {engine} is unavailable ({e}); falling back to Whisper")
                 engine = 'whisper'
@@ -198,7 +222,7 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
             whisper_model = normalize_whisper_model(model_size)
             status(f"Initializing Whisper Model: size={whisper_model}, language={language}, threads={cpu_threads}, compute=int8")
             model = WhisperModel(whisper_model, device="cpu", compute_type="int8", cpu_threads=cpu_threads)
-            segments, _ = model.transcribe(audio_samples, beam_size=5, vad_filter=True, language=None if language == 'auto' else language)
+            segments, _ = model.transcribe(audio_samples, beam_size=5, vad_filter=True, language=None if language == 'auto' else language, word_timestamps=diarize)
 
         if check_cancel and check_cancel():
             raise Exception("Transcription cancelled after model init")
@@ -255,11 +279,14 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
                 first_segment_seen = True
                 text_part = (segment.text or "").strip()
                 if text_part:
-                    segments_data.append({
+                    entry = {
                         'start': float(segment.start),
                         'end': float(segment.end),
                         'text': text_part,
-                    })
+                    }
+                    if diarize:
+                        entry['words'] = _segment_words(segment)
+                    segments_data.append(entry)
 
                     if structured:
                         timestamp = f"[{int(segment.start // 60):02d}:{int(segment.start % 60):02d}] "
@@ -296,6 +323,17 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
 
             if worker_error:
                 raise worker_error[0]
+
+        if diarize and embeddings_path:
+            if isinstance(audio_samples, np.ndarray):
+                from diarization import compute_embeddings, save_embeddings
+                status("[Speakers] Extracting voice fingerprints...")
+                windows, embeddings = compute_embeddings(
+                    audio_samples, [(s['start'], s['end']) for s in segments_data], cpu_threads, check_cancel, status)
+                save_embeddings(embeddings_path, windows, embeddings)
+                status(f"[Speakers] Saved {len(windows)} voice fingerprints")
+            else:
+                status("WARNING: audio could not be decoded in memory; speaker separation skipped")
 
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcription complete."})

@@ -578,6 +578,75 @@
         .chunk-row.failed .chunk-meta { color: #ff6b81; }
         .chunk-row.retry .chunk-meta { color: #e0b02a; }
 
+        input[type="number"] {
+            font: inherit;
+            font-size: 14px;
+            color: var(--text);
+            background-color: var(--raised);
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            height: 38px;
+            width: 110px;
+            padding: 0 12px;
+        }
+
+        .speaker-panel {
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid var(--line);
+            text-align: left;
+        }
+
+        .speaker-panel h3 {
+            margin: 0 0 4px;
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .speaker-row {
+            display: grid;
+            grid-template-columns: 110px 1fr;
+            gap: 4px 12px;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .speaker-row .speaker-id {
+            font-size: 14px;
+            color: var(--muted);
+        }
+
+        .speaker-row input[type="text"] {
+            height: 40px;
+            margin: 0;
+            font-size: 15px;
+        }
+
+        .speaker-row .speaker-evidence {
+            grid-column: 2;
+            font-size: 12px;
+            color: var(--muted);
+            overflow-wrap: anywhere;
+        }
+
+        .speaker-panel .speaker-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-top: 14px;
+        }
+
+        .speaker-panel .speaker-actions button {
+            font-size: 15px;
+            font-weight: 600;
+            color: #000;
+            background-color: var(--orange);
+            border: none;
+            border-radius: 10px;
+            padding: 10px 18px;
+        }
+
         @media (max-width: 520px) {
             body {
                 padding: 12px 10px;
@@ -709,6 +778,16 @@
                         </div>
                     </div>
                     <div id="asrHint" class="hint"></div>
+                    <label class="check">
+                        <input type="checkbox" id="diarizeToggle" onchange="updateSpeakerOptions()">
+                        Split by speaker
+                    </label>
+                    <div id="speakerCountRow" style="display: none;">
+                        <div class="field">
+                            <label for="speakerCount">Number of speakers:</label>
+                            <input type="number" id="speakerCount" min="1" max="20" placeholder="auto">
+                        </div>
+                    </div>
                 </div>
                 <div id="structured-option" style="display: none;">
                     <label class="check">
@@ -1174,6 +1253,8 @@
                 const modelSize = modelSelect ? modelSelect.value : 'small';
                 const languageSelect = document.getElementById('languageSelect');
                 const language = languageSelect ? languageSelect.value : 'auto';
+                const diarize = Boolean(document.getElementById('diarizeToggle')?.checked);
+                const speakerCountValue = document.getElementById('speakerCount')?.value || '';
                 const telegramPublishCheckbox = document.getElementById('telegramPublishCheckbox');
                 const publishToTelegram = Boolean(
                     isLocalTelegramVideoRequest()
@@ -1199,6 +1280,8 @@
                     formData.append('structured', structured);
                     formData.append('model_size', modelSize);
                     formData.append('language', language);
+                    formData.append('diarize', diarize);
+                    formData.append('num_speakers', speakerCountValue);
                     formData.append('server_only', saveOnServer);
                     formData.append('publish_to_telegram', publishToTelegram);
 
@@ -1216,6 +1299,8 @@
                             structured: structured,
                             model_size: modelSize,
                             language: language,
+                            diarize: diarize,
+                            num_speakers: speakerCountValue,
                             server_only: saveOnServer,
                             publish_to_telegram: publishToTelegram
                         })
@@ -1384,6 +1469,19 @@
                             message.textContent = isRussian ? 'Отправка в Telegram...' : 'Sending to Telegram...';
                             return;
                         }
+                        if (Array.isArray(data.speakers) && data.speakers.length) {
+                            // Let the user check speaker names before downloading.
+                            progressBar.style.width = '100%';
+                            renderSpeakerPanel(taskId, data);
+                            message.textContent = isRussian
+                                ? 'Готово. Проверьте имена говорящих и скачайте текст.'
+                                : 'Done. Check the speaker names and download the transcript.';
+                            btn.disabled = false;
+                            document.getElementById('cancelBtn').style.display = 'none';
+                            updateButtonText();
+                            if (data.speaker_names_status !== 'pending') clearInterval(interval);
+                            return;
+                        }
                         clearInterval(interval);
                         progressBar.style.width = '100%';
                         if (data.telegram_status === 'failed') {
@@ -1418,6 +1516,99 @@
                 }
             }, 1000);
         }
+
+        function updateSpeakerOptions() {
+            const toggle = document.getElementById('diarizeToggle');
+            const row = document.getElementById('speakerCountRow');
+            if (toggle && row) row.style.display = toggle.checked ? 'block' : 'none';
+        }
+
+        function renderSpeakerPanel(taskId, data) {
+            const statusArea = document.getElementById('status-area');
+            let panel = document.getElementById('speaker-panel');
+            if (!panel || panel.dataset.task !== taskId) {
+                if (panel) panel.remove();
+                panel = document.createElement('div');
+                panel.id = 'speaker-panel';
+                panel.className = 'speaker-panel';
+                panel.dataset.task = taskId;
+                const rows = data.speakers.map(s => `
+                    <div class="speaker-row">
+                        <span class="speaker-id">${escapeHtml(s.label)} · ${s.share}%</span>
+                        <input type="text" data-speaker="${s.id}" placeholder="${escapeHtml(s.label)}" autocomplete="off">
+                        <span class="speaker-evidence" data-evidence="${s.id}"></span>
+                    </div>`).join('');
+                const actionLabel = data.server_only
+                    ? (isRussian ? 'Сохранить имена' : 'Save names')
+                    : (isRussian ? 'Скачать текст' : 'Download transcript');
+                panel.innerHTML = `
+                    <h3>${isRussian ? 'Кто говорит' : 'Speakers'}</h3>
+                    <div class="hint" style="margin: 0;">${isRussian
+                        ? 'Впишите имена — они заменят «Спикер N» во всём тексте. Пустое поле оставит номер.'
+                        : 'Type names to replace “Speaker N” throughout the text. Leave a field empty to keep the number.'}</div>
+                    ${rows}
+                    <div class="speaker-actions">
+                        <span class="hint" id="speaker-names-status" style="margin: 0;"></span>
+                        <button type="button" id="speakerApplyBtn">${actionLabel}</button>
+                    </div>`;
+                statusArea.insertBefore(panel, document.getElementById('message'));
+                panel.querySelectorAll('input[data-speaker]').forEach(input => {
+                    input.addEventListener('input', () => { input.dataset.touched = '1'; });
+                });
+                document.getElementById('speakerApplyBtn').addEventListener('click', () => applySpeakerNames(taskId, data.server_only));
+            }
+            const suggestions = Array.isArray(data.speaker_suggestions) ? data.speaker_suggestions : [];
+            suggestions.forEach(s => {
+                const input = panel.querySelector(`input[data-speaker="${s.id}"]`);
+                const evidence = panel.querySelector(`[data-evidence="${s.id}"]`);
+                if (input && s.name && !input.dataset.touched && !input.value) input.value = s.name;
+                if (evidence && s.evidence) evidence.textContent = `«${s.evidence}»`;
+            });
+            const statusLine = document.getElementById('speaker-names-status');
+            if (statusLine) {
+                statusLine.textContent = suggestions.some(s => s.name)
+                    ? (isRussian ? 'Имена подставлены из текста — проверьте.' : 'Names suggested from the text — please check.')
+                    : '';
+            }
+        }
+
+        async function applySpeakerNames(taskId, serverOnly) {
+            const names = {};
+            document.querySelectorAll('#speaker-panel input[data-speaker]').forEach(input => {
+                if (input.value.trim()) names[input.dataset.speaker] = input.value.trim();
+            });
+            const button = document.getElementById('speakerApplyBtn');
+            button.disabled = true;
+            try {
+                const res = await fetch(`/speakers/${taskId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ names })
+                });
+                const result = await res.json();
+                if (!res.ok) throw new Error(result.error || res.statusText);
+                if (serverOnly) {
+                    document.getElementById('message').textContent = isRussian ? 'Имена сохранены в файле на сервере.' : 'Names saved to the file on the server.';
+                } else {
+                    localStorage.removeItem('active_task_id');
+                    window.location.href = `/get_file/${taskId}`;
+                }
+            } catch (e) {
+                document.getElementById('message').textContent = (isRussian ? 'Не удалось применить имена: ' : 'Could not apply names: ') + e.message;
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!isRussian) return;
+            const diarizeLabel = document.getElementById('diarizeToggle')?.parentElement;
+            if (diarizeLabel) diarizeLabel.lastChild.textContent = ' Разделять по говорящим';
+            const countLabel = document.querySelector('label[for="speakerCount"]');
+            if (countLabel) countLabel.textContent = 'Сколько человек говорит:';
+            const count = document.getElementById('speakerCount');
+            if (count) count.placeholder = 'авто';
+        });
 
         // The Whisper model only matters for languages Whisper handles.
         function updateAsrOptions() {
