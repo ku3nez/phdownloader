@@ -787,6 +787,10 @@
                             <label for="speakerCount">Number of speakers:</label>
                             <input type="number" id="speakerCount" min="1" max="20" placeholder="auto">
                         </div>
+                        <label class="check">
+                            <input type="checkbox" id="remarksToggle">
+                            Stage directions, like in a play (for fun)
+                        </label>
                     </div>
                 </div>
                 <div id="structured-option" style="display: none;">
@@ -1255,6 +1259,7 @@
                 const language = languageSelect ? languageSelect.value : 'auto';
                 const diarize = Boolean(document.getElementById('diarizeToggle')?.checked);
                 const speakerCountValue = document.getElementById('speakerCount')?.value || '';
+                const remarks = Boolean(diarize && document.getElementById('remarksToggle')?.checked);
                 const telegramPublishCheckbox = document.getElementById('telegramPublishCheckbox');
                 const publishToTelegram = Boolean(
                     isLocalTelegramVideoRequest()
@@ -1283,6 +1288,7 @@
                     formData.append('ui_language', isRussian ? 'ru' : 'en');
                     formData.append('diarize', diarize);
                     formData.append('num_speakers', speakerCountValue);
+                    formData.append('remarks', remarks);
                     formData.append('server_only', saveOnServer);
                     formData.append('publish_to_telegram', publishToTelegram);
 
@@ -1303,6 +1309,7 @@
                             ui_language: isRussian ? 'ru' : 'en',
                             diarize: diarize,
                             num_speakers: speakerCountValue,
+                            remarks: remarks,
                             server_only: saveOnServer,
                             publish_to_telegram: publishToTelegram
                         })
@@ -1615,6 +1622,8 @@
             if (countLabel) countLabel.textContent = 'Сколько человек говорит:';
             const count = document.getElementById('speakerCount');
             if (count) count.placeholder = 'авто';
+            const remarksLabel = document.getElementById('remarksToggle')?.parentElement;
+            if (remarksLabel) remarksLabel.lastChild.textContent = ' Ремарки, как в пьесе (по приколу)';
         });
 
         // The Whisper model only matters for languages Whisper handles.

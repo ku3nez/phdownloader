@@ -268,6 +268,10 @@ def write_final_transcript(output_path: str, segments: list[dict[str, Any]], str
         handle.write(build_plain_paragraphs(segments, structured))
 
 
+def remarks_enabled(task: dict) -> bool:
+    return bool(task.get("diarize")) and bool(task.get("remarks"))
+
+
 def speaker_settings(task: dict) -> tuple[bool, int | None]:
     raw = str(task.get("num_speakers") or "").strip()
     return bool(task.get("diarize")), (int(raw) if raw.isdigit() and int(raw) > 0 else None)
@@ -284,7 +288,8 @@ def write_speaker_transcript(task_id: str, task: dict, output_path: str, segment
     try:
         from diarization import diarize_transcript
 
-        speakers = diarize_transcript(segments, sources, output_path, structured, num_speakers, russian=bool(task.get("is_russian")))
+        speakers = diarize_transcript(segments, sources, output_path, structured, num_speakers,
+                                      russian=bool(task.get("is_russian")), remarks=remarks_enabled(task))
     except Exception as exc:
         log_event(task_id, f"speaker separation failed, writing plain transcript: {exc}")
         log_event(task_id, traceback.format_exc())
@@ -418,6 +423,7 @@ def run_single_transcription(task_id: str, file_path: str, structured: bool, mod
         return_segments=True,
         diarize=diarize,
         embeddings_path=embeddings_path,
+        tone=remarks_enabled(task),
     )
     if diarize:
         write_speaker_transcript(task_id, task, transcript_path, segments, [(0.0, embeddings_path)], structured)
@@ -504,6 +510,8 @@ def finalize_distributed_transcription(task_id: str) -> None:
             }
             if segment.get("words"):
                 entry["words"] = [{"t": offset + float(w["t"]), "w": w["w"]} for w in segment["words"]]
+            if segment.get("tone"):
+                entry["tone"] = segment["tone"]
             all_segments.append(entry)
 
     output_path = str(task.get("distributed_output_path") or distributed_output_path(task_id, str(task.get("source_file") or "result")))
@@ -620,6 +628,7 @@ def process_transcription_chunk(task_id: str, chunk_id: str) -> None:
             return_segments=True,
             diarize=bool(parent_task.get("diarize")),
             embeddings_path=chunk_embeddings_path(chunk) if parent_task.get("diarize") else None,
+            tone=remarks_enabled(parent_task),
         )
         with open(str(chunk["segments_path"]), "w", encoding="utf-8") as handle:
             json.dump(segments, handle, ensure_ascii=False)

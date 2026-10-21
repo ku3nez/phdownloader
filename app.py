@@ -311,6 +311,7 @@ def start_download():
         model_size = request.json.get("model_size", "small")
         language = request.json.get("language", "auto")
         diarize = request.json.get("diarize", False)
+        remarks = request.json.get("remarks", False)
         num_speakers = request.json.get("num_speakers")
         server_only = request.json.get("server_only", False)
         publish_to_telegram = request.json.get("publish_to_telegram", False)
@@ -323,6 +324,7 @@ def start_download():
         model_size = request.form.get("model_size", "small")
         language = request.form.get("language", "auto")
         diarize = request.form.get("diarize", "false").lower() == "true"
+        remarks = request.form.get("remarks", "false").lower() == "true"
         num_speakers = request.form.get("num_speakers")
         server_only = request.form.get("server_only", "false").lower() == "true"
         publish_to_telegram = request.form.get("publish_to_telegram", "false").lower() == "true"
@@ -339,6 +341,7 @@ def start_download():
         is_russian = request.headers.get("Accept-Language", "").strip().lower().startswith("ru")
     language = normalize_language(language)
     diarize = bool(diarize) and download_type == "transcript"
+    remarks = bool(remarks) and diarize
     try:
         num_speakers = int(num_speakers) if num_speakers not in (None, "") else None
     except (TypeError, ValueError):
@@ -377,6 +380,7 @@ def start_download():
         "model_size": model_size,
         "language": language,
         "diarize": diarize,
+        "remarks": remarks,
         "num_speakers": num_speakers,
         "download_type": download_type,
         "url": url,

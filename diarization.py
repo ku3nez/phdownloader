@@ -332,10 +332,11 @@ def _paragraphs(units, speaker_aware):
             or len(current["text"]) >= PARAGRAPH_HARD_CHARS
         )
         if start_new:
-            current = {"speaker": unit.get("speaker"), "start": unit["t"], "text": text}
+            current = {"speaker": unit.get("speaker"), "start": unit["t"], "text": text, "units": [unit]}
             paragraphs.append(current)
         else:
             current["text"] += " " + text
+            current["units"].append(unit)
         previous_time = unit["t"]
     if speaker_aware:
         # "Угу" / "Да" from someone else in the middle of a monologue would
@@ -346,18 +347,48 @@ def _paragraphs(units, speaker_aware):
                     and _is_backchannel(merged[-1]["text"])):
                 merged.pop()
                 merged[-1]["text"] += " " + paragraph["text"]
+                merged[-1]["units"] += paragraph["units"]
             else:
                 merged.append(paragraph)
         paragraphs = merged
     return paragraphs
 
 
-def build_lines(words, speakers, structured, russian=True):
-    """Transcript text with a speaker label on every paragraph."""
-    units = [{"t": w["t"], "text": str(w["w"]), "speaker": s} for w, s in zip(words, speakers)]
+def _remarks(paragraphs, segments, russian):
+    """Stage directions per paragraph, relative to each speaker's usual manner."""
+    from tone import PROFANITY_RE, choose_remarks, paragraph_stats
+
+    stats = [paragraph_stats([u["word"] for u in p["units"]], segments) for p in paragraphs]
+    baselines = {}
+    for speaker in {p["speaker"] for p in paragraphs}:
+        own = [s for s, p in zip(stats, paragraphs) if p["speaker"] == speaker]
+        dbs = [s["db"] for s in own if s["db"] is not None]
+        rates = [s["rate"] for s in own if s["rate"]]
+        baselines[speaker] = {"db": float(np.median(dbs)) if dbs else None, "rate": float(np.median(rates)) if rates else None}
+    remarks = []
+    for s, p in zip(stats, paragraphs):
+        # Short replies have too little signal for a remark, unless they swear.
+        if len(p["text"].split()) < 6:
+            remarks.append(choose_remarks(s, baselines[p["speaker"]], p["text"], russian)[:1] if PROFANITY_RE.search(p["text"]) else [])
+        else:
+            remarks.append(choose_remarks(s, baselines[p["speaker"]], p["text"], russian))
+    return remarks
+
+
+def build_lines(words, speakers, structured, russian=True, segments=None):
+    """Transcript text with a speaker label on every paragraph.
+
+    With segments (carrying "tone"), labels get stage directions:
+    "Спикер 2 (раздражённо, повысив голос): …".
+    """
+    units = [{"t": w["t"], "text": str(w["w"]), "speaker": s, "word": w} for w, s in zip(words, speakers)]
+    paragraphs = _paragraphs(units, speaker_aware=True)
+    remarks = _remarks(paragraphs, segments, russian) if segments is not None else [[] for _ in paragraphs]
     blocks = []
-    for paragraph in _paragraphs(units, speaker_aware=True):
+    for paragraph, remark in zip(paragraphs, remarks):
         label = speaker_label(paragraph["speaker"], russian)
+        if remark:
+            label += f" ({', '.join(remark)})"
         prefix = f"[{format_timestamp(paragraph['start'])}] " if structured else ""
         blocks.append(f"{prefix}{label}: {paragraph['text']}")
     return "\n\n".join(blocks) + "\n"
@@ -372,7 +403,7 @@ def build_plain_paragraphs(segments, structured):
     return "\n\n".join(p["text"] for p in paragraphs) + "\n"
 
 
-def diarize_transcript(segments, embedding_sources, output_path, structured, num_speakers=None, russian=True):
+def diarize_transcript(segments, embedding_sources, output_path, structured, num_speakers=None, russian=True, remarks=False):
     """Write the speaker-labelled transcript; return the speaker summary."""
     windows, embeddings = load_embeddings(embedding_sources)
     labels = cluster_speakers(embeddings, num_speakers)
@@ -384,7 +415,7 @@ def diarize_transcript(segments, embedding_sources, output_path, structured, num
     words.sort(key=lambda w: w["t"])
     speakers = assign_speakers(words, windows, labels)
     with open(output_path, "w", encoding="utf-8") as handle:
-        handle.write(build_lines(words, speakers, structured, russian))
+        handle.write(build_lines(words, speakers, structured, russian, segments if remarks else None))
     counts = {}
     for speaker in speakers:
         counts[speaker] = counts.get(speaker, 0) + 1
@@ -395,12 +426,12 @@ def diarize_transcript(segments, embedding_sources, output_path, structured, num
     ]
 
 
-LABEL_LINE = re.compile(r"^(\[[0-9:]+\] )?((?:Спикер|Speaker) (\d+)):", re.M)
+LABEL_LINE = re.compile(r"^(\[[0-9:]+\] )?((?:Спикер|Speaker) (\d+))( \([^)\n]*\))?:", re.M)
 
 
 def rename_speakers(raw_text, names):
     """Replace speaker labels at line starts with names ({number: name})."""
     def replace(match):
         name = names.get(int(match.group(3)))
-        return f"{match.group(1) or ''}{name or match.group(2)}:"
+        return f"{match.group(1) or ''}{name or match.group(2)}{match.group(4) or ''}:"
     return LABEL_LINE.sub(replace, raw_text)

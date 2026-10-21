@@ -18,7 +18,7 @@ a name pointing equally to two speakers is dropped.
 import re
 
 ROLE_WEIGHTS = {"self": 3, "introduced": 2, "addressee": 2}
-LINE_RE = re.compile(r"^(?:\[([0-9:]+)\] )?((?:Спикер|Speaker) (\d+)): (.*)$")
+LINE_RE = re.compile(r"^(?:\[([0-9:]+)\] )?((?:Спикер|Speaker) (\d+))(?: \([^)]*\))?: (.*)$")
 TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+(?:-[A-Za-zА-Яа-яЁё]+)?|[^\sA-Za-zА-Яа-яЁё]")
 
 SELF_BEFORE_RE = re.compile(r"(?:меня зовут|зовут меня|мо[её] имя|я\s*[—–-]|my name is|i am|i'm|this is)\s*$", re.I)

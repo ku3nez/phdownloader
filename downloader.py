@@ -137,7 +137,7 @@ def _segment_words(segment):
     return [{'t': float(segment.start), 'w': text}] if text else []
 
 
-def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='small', total_duration=0, progress_callback=None, check_cancel=None, return_segments=False, language=None, diarize=False, embeddings_path=None):
+def transcribe_with_whisper(audio_path, output_path, structured=True, model_size='small', total_duration=0, progress_callback=None, check_cancel=None, return_segments=False, language=None, diarize=False, embeddings_path=None, tone=False):
     """Transcribe an audio file.
 
     Russian goes to GigaAM, Parakeet's European languages to Parakeet and
@@ -334,6 +334,17 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
                 status(f"[Speakers] Saved {len(windows)} voice fingerprints")
             else:
                 status("WARNING: audio could not be decoded in memory; speaker separation skipped")
+
+        if tone and isinstance(audio_samples, np.ndarray):
+            # Free the recognition model before loading the emotion model.
+            segments = None
+            model = None
+            import gc
+            gc.collect()
+            from tone import segment_tones
+            status("[Speakers] Listening to the tone of voice...")
+            for entry, value in zip(segments_data, segment_tones(audio_samples, segments_data, cpu_threads, check_cancel, status)):
+                entry['tone'] = value
 
         if progress_callback:
             progress_callback({'type': 'status', 'msg': "Transcription complete."})
