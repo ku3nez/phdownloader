@@ -140,6 +140,10 @@ def choose_remarks(stats, baseline, text, russian=True, limit=2):
     louder = (stats["db"] - baseline["db"]) if stats.get("db") is not None and baseline.get("db") is not None else 0.0
     pace = (stats["rate"] / baseline["rate"]) if stats.get("rate") and baseline.get("rate") else 1.0
     swears = len(PROFANITY_RE.findall(text))
+    # Loudness and pace of a few words are noise ("Что идём дальше…" came out
+    # "с расстановкой"); use them only for paragraphs of a dozen words or more.
+    if len(text.split()) < 12:
+        louder, pace = 0.0, 1.0
 
     if swears and (louder >= 4 or angry >= 0.5):
         picked.append("swear_shout")

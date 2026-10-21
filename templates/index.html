@@ -745,7 +745,7 @@
             </div>
 
             <div class="settings">
-                <div class="field">
+                <div class="field" id="qualityRow">
                     <label for="qualitySelect">Quality:</label>
                     <select id="qualitySelect">
                         <option value="best" {% if default_quality=='best' %}selected{% endif %}>Best Available</option>
@@ -1683,6 +1683,12 @@
                 aiOptions.style.display = 'none';
                 inputTabs.style.display = 'none';
                 setInputSource('url'); // reset to url for non-transcript formats
+            }
+
+            // Quality only applies to video and audio downloads.
+            const qualityRow = document.getElementById('qualityRow');
+            if (qualityRow) {
+                qualityRow.style.display = (radio && (radio.value === 'transcript' || radio.value === 'subtitles')) ? 'none' : 'flex';
             }
 
             // Always update quality options when format changes
