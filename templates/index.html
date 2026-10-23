@@ -568,6 +568,100 @@
             text-overflow: ellipsis;
         }
 
+        /* Playlist / series: episode picker */
+        #playlist-panel {
+            display: none;
+            margin: 10px 0 4px;
+            padding: 12px;
+            background-color: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            text-align: left;
+        }
+
+        .pl-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 13.5px;
+            margin-bottom: 10px;
+        }
+
+        .pl-head #plTitle {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .pl-head #plCount {
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .pl-tools {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .pl-tools input {
+            flex: 1;
+            min-width: 120px;
+            padding: 5px 10px;
+            font-size: 12.5px;
+        }
+
+        .ep-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+            gap: 6px;
+            max-height: 230px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .ep-btn {
+            height: 40px;
+            font-size: 14px;
+            font-variant-numeric: tabular-nums;
+            color: var(--text);
+            background-color: var(--raised);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .ep-btn:hover {
+            border-color: #5a5a5a;
+        }
+
+        .ep-btn.selected {
+            color: #000;
+            background-color: var(--green);
+            border-color: var(--green);
+        }
+
+        #inspectHint {
+            margin: 6px 0 0;
+        }
+
+        .chunk-row.item {
+            grid-template-columns: minmax(0, 1fr) 90px 92px;
+        }
+
+        .chunk-label a {
+            color: var(--green);
+            text-decoration: none;
+        }
+
+        #zipLink {
+            display: none;
+            margin: 0 auto 12px;
+            text-decoration: none;
+            width: fit-content;
+        }
+
         .chunk-row.queued .chunk-fill { background-color: #5a5a5a; }
         .chunk-row.retry .chunk-fill { background-color: #e0b02a; }
         .chunk-row.completed .chunk-fill { background-color: var(--green); }
@@ -710,6 +804,17 @@
             <!-- URL Input Container -->
             <div id="url-input-container">
                 <input type="text" id="urlInput" placeholder="Paste URL here..." required>
+                <p id="inspectHint" class="hint"></p>
+            </div>
+
+            <div id="playlist-panel">
+                <div class="pl-head"><span id="plTitle"></span><span id="plCount"></span></div>
+                <div class="pl-tools">
+                    <button type="button" class="ghost-btn" id="plAllBtn" onclick="plSelectAll(true)">All</button>
+                    <button type="button" class="ghost-btn" id="plNoneBtn" onclick="plSelectAll(false)">None</button>
+                    <input type="text" id="plRange" placeholder="1-10, 15" onchange="plApplyRange()" onkeydown="if (event.key === 'Enter') { event.preventDefault(); plApplyRange(); }">
+                </div>
+                <div id="plGrid" class="ep-grid"></div>
             </div>
 
             <!-- Local File Input Container -->
@@ -754,6 +859,10 @@
                         <option value="480" {% if default_quality=='480' %}selected{% endif %}>480p</option>
                         <option value="360" {% if default_quality=='360' %}selected{% endif %}>360p</option>
                     </select>
+                </div>
+                <div class="field" id="audioTrackRow" style="display: none;">
+                    <label for="audioTrackSelect">Audio track:</label>
+                    <select id="audioTrackSelect"></select>
                 </div>
                 <div id="audio-quality-hint" class="hint" style="display: none;">
                     Higher bitrate = better sound, larger file.
@@ -822,6 +931,7 @@
                 <span id="sizeLabel">Downloaded: ---</span>
             </div>
             <div id="chunk-list" aria-live="polite"></div>
+            <a id="zipLink" class="ghost-btn" href="#">Download all as ZIP</a>
             <div class="status-row">
                 <p id="currentStatus">Ready</p>
                 <button id="cancelBtn" class="ghost-btn" onclick="cancelDownload()">Cancel</button>
@@ -844,6 +954,162 @@
         // Localization logic
         const lang = navigator.language || navigator.userLanguage;
         const isRussian = lang.startsWith('ru');
+
+        // ---- Playlist / series: which episodes, which audio track ----------
+        let playlist = null;          // {title, entries, selected: Set of index}
+        let audioTracks = [];
+        let inspectTimer = null;
+        let inspectSeq = 0;
+        let lastClicked = null;
+
+        function plText(key, n) {
+            const ru = {
+                checking: 'Проверяю ссылку…', all: 'Все', none: 'Снять', of: 'из', selected: 'выбрано',
+                original: 'Оригинал', track: 'Озвучка:', range: '1-10, 15',
+                truncated: 'показаны первые', videos: 'видео',
+            };
+            const en = {
+                checking: 'Checking the link…', all: 'All', none: 'None', of: 'of', selected: 'selected',
+                original: 'Original', track: 'Audio track:', range: '1-10, 15',
+                truncated: 'showing the first', videos: 'videos',
+            };
+            return (isRussian ? ru : en)[key];
+        }
+
+        function resetInspection() {
+            playlist = null;
+            audioTracks = [];
+            document.getElementById('playlist-panel').style.display = 'none';
+            document.getElementById('inspectHint').textContent = '';
+            renderAudioTracks();
+            updateButtonText();
+        }
+
+        function scheduleInspect() {
+            clearTimeout(inspectTimer);
+            const url = document.getElementById('urlInput').value.trim();
+            resetInspection();
+            if (!/^https?:\/\/\S+$/i.test(url) || isPornHubVideoRequest()) return;
+            inspectTimer = setTimeout(() => inspectLink(url), 600);
+        }
+
+        async function inspectLink(url) {
+            const seq = ++inspectSeq;
+            const hint = document.getElementById('inspectHint');
+            hint.textContent = plText('checking');
+            try {
+                const res = await fetch('/inspect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                const data = await res.json();
+                if (seq !== inspectSeq) return;
+                hint.textContent = '';
+                audioTracks = Array.isArray(data.audio_tracks) ? data.audio_tracks : [];
+                if (data.kind === 'playlist' && Array.isArray(data.entries) && data.entries.length) {
+                    const selected = new Set(data.current ? [data.current] : data.entries.map(e => e.index));
+                    playlist = { title: data.title || '', entries: data.entries, selected, truncated: data.truncated };
+                    renderPlaylist();
+                }
+                renderAudioTracks();
+                updateButtonText();
+            } catch (e) {
+                if (seq === inspectSeq) hint.textContent = '';
+            }
+        }
+
+        function renderPlaylist() {
+            const panel = document.getElementById('playlist-panel');
+            if (!playlist) { panel.style.display = 'none'; return; }
+            document.getElementById('plTitle').textContent = playlist.title;
+            document.getElementById('plTitle').title = playlist.title;
+            document.getElementById('plAllBtn').textContent = plText('all');
+            document.getElementById('plNoneBtn').textContent = plText('none');
+            document.getElementById('plRange').placeholder = plText('range');
+            const grid = document.getElementById('plGrid');
+            grid.innerHTML = playlist.entries.map(e => {
+                const tip = escapeHtml(e.title + (e.duration ? ` (${formatClock(e.duration)})` : ''));
+                const cls = playlist.selected.has(e.index) ? 'ep-btn selected' : 'ep-btn';
+                return `<button type="button" class="${cls}" data-index="${e.index}" title="${tip}">${e.index}</button>`;
+            }).join('');
+            grid.querySelectorAll('.ep-btn').forEach(btn => btn.addEventListener('click', plToggle));
+            updatePlaylistCount();
+            panel.style.display = 'block';
+        }
+
+        function updatePlaylistCount() {
+            if (!playlist) return;
+            let text = `${playlist.selected.size} ${plText('of')} ${playlist.entries.length} ${plText('selected')}`;
+            if (playlist.truncated) text += ` · ${plText('truncated')} ${playlist.entries.length} ${plText('videos')}`;
+            document.getElementById('plCount').textContent = text;
+            document.querySelectorAll('#plGrid .ep-btn').forEach(btn => {
+                btn.classList.toggle('selected', playlist.selected.has(Number(btn.dataset.index)));
+            });
+            updateButtonText();
+        }
+
+        function plToggle(event) {
+            const index = Number(event.currentTarget.dataset.index);
+            const turnOn = !playlist.selected.has(index);
+            if (event.shiftKey && lastClicked !== null) {
+                // Shift+click selects (or clears) the whole range.
+                const [lo, hi] = [Math.min(lastClicked, index), Math.max(lastClicked, index)];
+                playlist.entries.forEach(e => {
+                    if (e.index >= lo && e.index <= hi) turnOn ? playlist.selected.add(e.index) : playlist.selected.delete(e.index);
+                });
+            } else {
+                turnOn ? playlist.selected.add(index) : playlist.selected.delete(index);
+            }
+            lastClicked = index;
+            updatePlaylistCount();
+        }
+
+        function plSelectAll(on) {
+            if (!playlist) return;
+            playlist.selected = new Set(on ? playlist.entries.map(e => e.index) : []);
+            updatePlaylistCount();
+        }
+
+        function plApplyRange() {
+            if (!playlist) return;
+            const text = document.getElementById('plRange').value.trim();
+            if (!text) return;
+            const wanted = new Set();
+            text.split(/[,;\s]+/).forEach(part => {
+                const m = part.match(/^(\d+)(?:[-–](\d+))?$/);
+                if (!m) return;
+                const lo = Number(m[1]), hi = Number(m[2] || m[1]);
+                for (let i = Math.min(lo, hi); i <= Math.max(lo, hi); i++) wanted.add(i);
+            });
+            playlist.selected = new Set(playlist.entries.map(e => e.index).filter(i => wanted.has(i)));
+            updatePlaylistCount();
+        }
+
+        function renderAudioTracks() {
+            const row = document.getElementById('audioTrackRow');
+            const select = document.getElementById('audioTrackSelect');
+            const format = document.querySelector('input[name="format"]:checked')?.value;
+            if (!audioTracks.length || format === 'subtitles' || format === 'transcript') {
+                row.style.display = 'none';
+                return;
+            }
+            const previous = select.value;
+            const original = audioTracks.find(t => t.original);
+            const options = [`<option value="">${plText('original')}${original ? ' — ' + escapeHtml(original.label) : ''}</option>`];
+            audioTracks.filter(t => !t.original).forEach(t => {
+                options.push(`<option value="${escapeHtml(t.id)}">${escapeHtml(t.label)}</option>`);
+            });
+            select.innerHTML = options.join('');
+            if ([...select.options].some(o => o.value === previous)) select.value = previous;
+            document.querySelector('label[for="audioTrackSelect"]').textContent = plText('track');
+            row.style.display = 'flex';
+        }
+
+        function selectedPlaylistItems() {
+            if (!playlist) return [];
+            return playlist.entries.filter(e => playlist.selected.has(e.index));
+        }
 
         function isPornHubVideoRequest() {
             const url = document.getElementById('urlInput')?.value || '';
@@ -985,6 +1251,15 @@
                 } else {
                     btn.textContent = isRussian ? 'Распознать по ссылке' : 'Transcribe Link';
                 }
+            } else if (playlist && inputSource === 'url') {
+                const n = playlist.selected.size;
+                if (format === 'subtitles') {
+                    btn.textContent = isRussian ? `Получить субтитры: ${n}` : `Get subtitles: ${n}`;
+                } else if (format === 'audio') {
+                    btn.textContent = isRussian ? `Скачать аудио: ${n}` : `Download audio: ${n}`;
+                } else {
+                    btn.textContent = isRussian ? `Скачать видео: ${n}` : `Download videos: ${n}`;
+                }
             } else if (format === 'subtitles') {
                 btn.textContent = isRussian ? 'Получить субтитры' : 'Get Subtitles';
             } else if (format === 'audio') {
@@ -1116,6 +1391,10 @@
             updateButtonText();
             updateTelegramPublishVisibility();
             document.getElementById('urlInput').addEventListener('input', updateTelegramPublishVisibility);
+            document.getElementById('urlInput').addEventListener('input', scheduleInspect);
+            document.querySelectorAll('input[name="format"]').forEach((input) => input.addEventListener('change', () => { renderAudioTracks(); updateButtonText(); }));
+            const zipLink = document.getElementById('zipLink');
+            if (zipLink && isRussian) zipLink.textContent = 'Скачать всё архивом (ZIP)';
             document.querySelectorAll('input[name="format"]').forEach((input) => input.addEventListener('change', updateTelegramPublishVisibility));
             window.addEventListener('hashchange', () => {
                 updateStructuredOptionVisibility();
@@ -1236,6 +1515,14 @@
                     alert(isRussian ? "Пожалуйста, введите ссылку" : "Please enter a URL");
                     return;
                 }
+                if (playlist && format === 'transcript') {
+                    alert(isRussian ? "Для плейлиста доступны видео, аудио и субтитры" : "Playlists can be downloaded as video, audio or subtitles");
+                    return;
+                }
+                if (playlist && playlist.selected.size === 0) {
+                    alert(isRussian ? "Выберите хотя бы одно видео" : "Select at least one video");
+                    return;
+                }
             }
 
             btn.disabled = true;
@@ -1246,6 +1533,7 @@
             speedLabel.textContent = 'Speed: ---';
             sizeLabel.textContent = 'Downloaded: ---';
             renderChunks(null);
+            document.getElementById('zipLink').style.display = 'none';
             logContainer.innerHTML = `<div>${isRussian ? 'Ожидание ответа сервера...' : 'Waiting for server...'}</div>`;
 
             try {
@@ -1311,7 +1599,11 @@
                             num_speakers: speakerCountValue,
                             remarks: remarks,
                             server_only: saveOnServer,
-                            publish_to_telegram: publishToTelegram
+                            publish_to_telegram: publishToTelegram,
+                            audio_language: document.getElementById('audioTrackRow').style.display !== 'none'
+                                ? document.getElementById('audioTrackSelect').value : '',
+                            items: selectedPlaylistItems(),
+                            playlist_title: playlist ? playlist.title : ''
                         })
                     });
 
@@ -1367,6 +1659,10 @@
                 list.innerHTML = '';
                 return;
             }
+            if (data.processing_mode === 'batch') {
+                renderItems(list, data, chunks);
+                return;
+            }
             const t = isRussian
                 ? { title: 'Части аудио', done: 'готово', working: 'в работе', queued: 'в очереди',
                     retry: 'повтор', failed: 'ошибка', cancelled: 'отменено' }
@@ -1416,7 +1712,52 @@
             list.style.display = 'block';
         }
 
+        // One bar per video of a playlist download, with a link once it is ready.
+        function renderItems(list, data, chunks) {
+            const t = isRussian
+                ? { title: 'Видео', done: 'готово', queued: 'в очереди', failed: 'ошибка', cancelled: 'отменено', get: 'скачать' }
+                : { title: 'Videos', done: 'done', queued: 'queued', failed: 'failed', cancelled: 'cancelled', get: 'download' };
+            let done = 0;
+            const rows = chunks.map(chunk => {
+                const state = chunk.status || 'queued';
+                let progress = Math.min(100, Math.max(0, Number(chunk.progress) || 0));
+                const node = chunk.worker_node ? escapeHtml(chunk.worker_node) : '';
+                let meta;
+                if (state === 'completed') {
+                    done += 1;
+                    progress = 100;
+                    meta = data.server_only
+                        ? `✓ ${node || t.done}`
+                        : `<a href="/get_file/${encodeURIComponent(data.task_id || window.currentTaskId)}?item=${encodeURIComponent(chunk.chunk_id)}">⬇ ${t.get}</a>`;
+                } else if (state === 'processing') {
+                    const speed = chunk.details && chunk.details.speed ? ` · ${escapeHtml(chunk.details.speed)}` : '';
+                    meta = `${Math.round(progress)}%${speed}`;
+                } else if (state === 'failed') {
+                    meta = t.failed;
+                } else if (state === 'cancelled') {
+                    meta = t.cancelled;
+                } else {
+                    meta = t.queued;
+                    progress = 0;
+                }
+                const title = `${chunk.index}. ${chunk.title || ''}`;
+                const tooltip = escapeHtml([title, chunk.worker_node, chunk.error].filter(Boolean).join(' · '));
+                return `<div class="chunk-row item ${state}" title="${tooltip}">
+                    <span class="chunk-label">${escapeHtml(title)}</span>
+                    <div class="chunk-track"><div class="chunk-fill" style="width: ${progress}%"></div></div>
+                    <span class="chunk-meta">${meta}</span>
+                </div>`;
+            });
+            const head = data.playlist_title ? escapeHtml(data.playlist_title) : t.title;
+            list.innerHTML = `<div class="chunk-head"><span>${head}</span><span>${done}/${chunks.length} ${t.done}</span></div>${rows.join('')}`;
+            list.style.display = 'block';
+            const zip = document.getElementById('zipLink');
+            zip.href = `/get_zip/${encodeURIComponent(window.currentTaskId)}`;
+            zip.style.display = (!data.server_only && done > 1 && data.status !== 'processing') ? 'block' : 'none';
+        }
+
         async function pollProgress(taskId) {
+            window.currentTaskId = taskId;
             const progressBar = document.getElementById('progressBar');
             const message = document.getElementById('message');
             const btn = document.getElementById('downloadBtn');
@@ -1439,7 +1780,8 @@
 
                     if (data.current_status) {
                         // The chunk list already shows the per-part counts.
-                        const distributed = data.status === 'processing' && Array.isArray(data.chunks) && data.chunks.length > 0;
+                        const distributed = data.status === 'processing' && Array.isArray(data.chunks) && data.chunks.length > 0
+                            && data.processing_mode !== 'batch';
                         document.getElementById('currentStatus').textContent = distributed
                             ? (isRussian ? 'Распознавание по частям на нескольких серверах' : 'Transcribing in parts on several servers')
                             : data.current_status;
@@ -1447,7 +1789,11 @@
 
                     if (data.status === 'processing') {
                         progressBar.style.width = data.progress + '%';
-                        if (data.download_type === 'transcript') {
+                        if (data.processing_mode === 'batch') {
+                            message.textContent = isRussian
+                                ? `Скачивание плейлиста... ${Math.round(data.progress)}%`
+                                : `Downloading playlist... ${Math.round(data.progress)}%`;
+                        } else if (data.download_type === 'transcript') {
                             message.textContent = isRussian 
                                 ? `Распознавание текста... ${Math.round(data.progress)}%` 
                                 : `Transcribing text... ${Math.round(data.progress)}%`;
@@ -1457,7 +1803,7 @@
                                 : `Downloading... ${Math.round(data.progress)}%`;
                         }
 
-                        if (data.details && Object.keys(data.details).length > 0) {
+                        if (data.processing_mode !== 'batch' && data.details && Object.keys(data.details).length > 0) {
                             speedLabel.textContent = `Speed: ${data.details.speed}`;
                             sizeLabel.textContent = `Downloaded: ${data.details.downloaded} / ${data.details.total}`;
                             speedLabel.style.display = 'inline';
@@ -1476,6 +1822,18 @@
                     } else if (data.status === 'completed') {
                         if (data.publish_to_telegram && data.telegram_status !== 'completed' && data.telegram_status !== 'failed' && data.telegram_status !== 'cancelled') {
                             message.textContent = isRussian ? 'Отправка в Telegram...' : 'Sending to Telegram...';
+                            return;
+                        }
+                        if (data.processing_mode === 'batch') {
+                            clearInterval(interval);
+                            progressBar.style.width = '100%';
+                            const summary = data.chunk_summary || {};
+                            message.textContent = data.server_only
+                                ? (isRussian ? `Готово: ${summary.completed} из ${summary.count} сохранено на сервере.` : `Done: ${summary.completed} of ${summary.count} saved on the server.`)
+                                : (isRussian ? `Готово: ${summary.completed} из ${summary.count}. Скачайте файлы по ссылкам или архивом.` : `Done: ${summary.completed} of ${summary.count}. Download the files from the links or as a ZIP.`);
+                            btn.disabled = false;
+                            document.getElementById('cancelBtn').style.display = 'none';
+                            updateButtonText();
                             return;
                         }
                         if (Array.isArray(data.speakers) && data.speakers.length) {

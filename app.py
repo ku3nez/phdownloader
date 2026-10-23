@@ -7,7 +7,7 @@ import unicodedata
 import uuid
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, Response, jsonify, render_template, request, send_file
 
 from cluster_config import (
     APP_PORT,
@@ -28,6 +28,7 @@ from cluster_config import (
 from asr_routing import FAST_ENGINES, normalize_language, normalize_whisper_model
 from media_urls import is_pornhub_url, is_youtube_url
 from task_store import RQ_WAITING_STATUSES, TaskStore
+import batch
 
 
 def safe_print(*args, **kwargs):
@@ -85,7 +86,7 @@ def is_waiting_for_worker(task: dict) -> bool:
         # The job ID is written right after enqueue; without it the task is
         # still being created.
         return not job_id or store.get_job_status(job_id) in RQ_WAITING_STATUSES
-    if task.get("processing_mode") == "distributed":
+    if task.get("processing_mode") in ("distributed", batch.BATCH_MODE):
         for chunk in task.get("chunks", []):
             if chunk.get("status") in {"queued", "processing"} and store.get_job_status(chunk.get("rq_job_id")) in RQ_WAITING_STATUSES:
                 return True
@@ -228,6 +229,9 @@ def cleanup_downloads() -> None:
                         continue
                     # Speaker-labelled transcripts wait for the user to name the speakers.
                     expiration = max(FILE_EXPIRATION_SECONDS, 3600) if task and task.get("speakers") else FILE_EXPIRATION_SECONDS
+                    if task and task.get("processing_mode") == batch.BATCH_MODE:
+                        # Episodes are fetched one by one, give the user time.
+                        expiration = max(FILE_EXPIRATION_SECONDS, batch.BATCH_FILE_EXPIRATION_SECONDS)
                     if now - os.path.getmtime(item_path) <= expiration:
                         continue
                     if os.path.isdir(item_path):
@@ -315,6 +319,8 @@ def start_download():
         num_speakers = request.json.get("num_speakers")
         server_only = request.json.get("server_only", False)
         publish_to_telegram = request.json.get("publish_to_telegram", False)
+        items = request.json.get("items") or []
+        audio_language = request.json.get("audio_language") or None
     else:
         url = request.form.get("url")
         file = request.files.get("file")
@@ -328,8 +334,16 @@ def start_download():
         num_speakers = request.form.get("num_speakers")
         server_only = request.form.get("server_only", "false").lower() == "true"
         publish_to_telegram = request.form.get("publish_to_telegram", "false").lower() == "true"
+        items = []
+        audio_language = request.form.get("audio_language") or None
 
     publish_to_telegram = bool(publish_to_telegram)
+    audio_language = "".join(ch for ch in str(audio_language or "") if ch.isalnum() or ch == "-")[:20] or None
+    items = [item for item in items if isinstance(item, dict) and str(item.get("url") or "").startswith(("http://", "https://"))]
+    if items and download_type not in ("video", "audio", "subtitles"):
+        return jsonify({"error": "Playlists can be downloaded as video, audio or subtitles"}), 400
+    if len(items) > batch.MAX_BATCH_ITEMS:
+        return jsonify({"error": f"Too many videos selected (max {batch.MAX_BATCH_ITEMS})"}), 400
     model_size = normalize_whisper_model(model_size)
     # The page reports its own interface language so labels written by the
     # worker ("Спикер"/"Speaker") match the page; otherwise use the browser's
@@ -358,7 +372,7 @@ def start_download():
         server_only = True
 
     log_event("HTTP", f"Parsed start payload url_present={bool(url)} file_present={bool(file)} quality={quality} download_type={download_type} structured={structured} model_size={model_size} language={language} server_only={server_only} publish_to_telegram={publish_to_telegram}")
-    if not url and not file:
+    if not url and not file and not items:
         return jsonify({"error": "URL or File is required"}), 400
     if file and download_type != "transcript" and not publish_to_telegram:
         return jsonify({"error": "Uploaded files are supported only for transcription or Telegram video publishing"}), 400
@@ -384,12 +398,17 @@ def start_download():
         "num_speakers": num_speakers,
         "download_type": download_type,
         "url": url,
+        "quality": quality,
+        "audio_language": audio_language,
         "worker_node": None,
         "publish_to_telegram": publish_to_telegram,
         "telegram_status": "requested" if publish_to_telegram else "not_requested",
     }
     store.save_task(task_id, task)
     store.append_log(task_id, f"[{task_id}] Task created on API node remote_addr={request.remote_addr}")
+
+    if items:
+        return start_batch(task_id, items, request.remote_addr)
 
     if file:
         filename = normalize_uploaded_filename(file)
@@ -445,9 +464,66 @@ def start_download():
     return jsonify({"task_id": task_id})
 
 
+def queue_for_url(url: str, download_type: str) -> str:
+    if is_youtube_url(url):
+        return RQ_YOUTUBE_QUEUE_NAME
+    if download_type == "transcript":
+        return RQ_TRANSCRIPT_QUEUE_NAME
+    if is_pornhub_url(url):
+        return RQ_PORNHUB_QUEUE_NAME
+    return RQ_DEFAULT_QUEUE_NAME
+
+
+def start_batch(task_id: str, items: list, remote_addr: str):
+    """One parent task, one RQ job per selected episode."""
+    chunks = []
+    for number, item in enumerate(items):
+        chunks.append({
+            "chunk_id": f"item-{number:03d}",
+            "index": int(item.get("index") or number + 1),
+            "title": " ".join(str(item.get("title") or "").split())[:200],
+            "url": str(item["url"]),
+            "duration": item.get("duration"),
+            "status": "queued",
+            "progress": 0,
+        })
+    store.save_chunks(task_id, chunks)
+    store.update_task(task_id, status="processing", processing_mode=batch.BATCH_MODE, total_chunks=len(chunks),
+                      playlist_title=" ".join(str((request.get_json(silent=True) or {}).get("playlist_title") or "").split())[:200])
+    task = store.get_task(task_id) or {}
+    for chunk in chunks:
+        job = store.enqueue(
+            "worker.process_playlist_item",
+            task_id,
+            chunk["chunk_id"],
+            queue_name=queue_for_url(chunk["url"], str(task.get("download_type") or "video")),
+        )
+        store.update_chunk(task_id, chunk["chunk_id"], rq_job_id=job.id, queue_name=job.origin)
+    store.append_log(task_id, f"[{task_id}] Playlist task: {len(chunks)} videos enqueued from {remote_addr}")
+    batch.refresh(store, task_id)
+    return jsonify({"task_id": task_id})
+
+
+@app.route("/inspect", methods=["POST"])
+def inspect_link():
+    """Playlist episodes and audio tracks of a link, for the page to offer a choice."""
+    url = str((request.get_json(silent=True) or {}).get("url") or "").strip()
+    if not url.startswith(("http://", "https://")) or is_pornhub_url(url):
+        return jsonify({"kind": "unknown"})
+    try:
+        from media_inspect import inspect_url
+
+        return jsonify(inspect_url(url))
+    except Exception as exc:
+        log_event("inspect", f"failed url={url}: {exc}")
+        return jsonify({"kind": "unknown", "error": str(exc)[:300]})
+
+
 @app.route("/progress/<task_id>")
 def get_progress(task_id: str):
     task = reconcile_distributed_task(task_id)
+    if task and task.get("processing_mode") == batch.BATCH_MODE:
+        task = batch.reconcile(store, task_id)
     if not task:
         log_event("HTTP", f"GET /progress/{task_id} -> 404 task not found")
         return jsonify({"error": "Task not found"}), 404
@@ -499,10 +575,78 @@ def rename_task_speakers(task_id: str):
 @app.route("/get_file/<task_id>")
 def get_file(task_id: str):
     task = store.get_task(task_id)
+    item_id = request.args.get("item")
+    if task and item_id:
+        chunk = store.get_chunk(task_id, item_id) or {}
+        path = chunk.get("filename")
+        if chunk.get("status") == "completed" and path and os.path.exists(path) and is_inside_task(task_id, path):
+            return send_file(path, as_attachment=True)
+        return "File not ready or task not found", 404
     if not task or task.get("status") != "completed" or not task.get("filename"):
         log_event("HTTP", f"GET /get_file/{task_id} -> 404 status={task.get('status') if task else None} filename={task.get('filename') if task else None}")
         return "File not ready or task not found", 404
     return send_file(task["filename"], as_attachment=True)
+
+
+def is_inside_task(task_id: str, path: str) -> bool:
+    root = os.path.realpath(task_dir(task_id))
+    return os.path.realpath(path).startswith(root + os.sep)
+
+
+class _ZipSink:
+    """Write-only stream for zipfile that hands out what was written."""
+
+    def __init__(self):
+        self.parts = []
+        self.position = 0
+
+    def write(self, data):
+        self.parts.append(bytes(data))
+        self.position += len(data)
+        return len(data)
+
+    def flush(self):
+        pass
+
+    def take(self):
+        data = b"".join(self.parts)
+        self.parts = []
+        return data
+
+
+@app.route("/get_zip/<task_id>")
+def get_zip(task_id: str):
+    """All downloaded episodes as one ZIP, streamed without a temporary file."""
+    import zipfile
+    from urllib.parse import quote
+
+    task = store.get_task(task_id)
+    if not task or task.get("processing_mode") != batch.BATCH_MODE:
+        return "Task not found", 404
+    paths = [c["filename"] for c in task.get("chunks") or []
+             if c.get("status") == "completed" and c.get("filename") and os.path.exists(c["filename"])
+             and is_inside_task(task_id, c["filename"])]
+    if not paths:
+        return "Nothing downloaded yet", 404
+
+    def generate():
+        sink = _ZipSink()
+        with zipfile.ZipFile(sink, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+            for path in paths:
+                with open(path, "rb") as source, archive.open(os.path.basename(path), "w", force_zip64=True) as target:
+                    while True:
+                        block = source.read(1024 * 1024)
+                        if not block:
+                            break
+                        target.write(block)
+                        yield sink.take()
+        yield sink.take()
+
+    name = " ".join(str(task.get("playlist_title") or "playlist").split())[:80] or "playlist"
+    name = "".join("_" if ch in '<>:"/\\|?*' else ch for ch in name) + ".zip"
+    return Response(generate(), mimetype="application/zip", headers={
+        "Content-Disposition": f"attachment; filename=playlist.zip; filename*=UTF-8''{quote(name)}",
+    })
 
 
 if __name__ == "__main__":

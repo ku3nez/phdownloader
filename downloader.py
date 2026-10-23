@@ -378,7 +378,7 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
 ORIGINAL_AUDIO = '[format_note*=original][format_id!*=drc]'
 
 
-def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None, metadata_callback=None, check_cancel=None):
+def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None, metadata_callback=None, check_cancel=None, audio_language=None, filename_prefix=''):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
@@ -592,6 +592,14 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         'proxy': (youtube_proxy if is_youtube and youtube_proxy else proxy) or None,
     }
 
+    # Audio track: the chosen dub (exact language, then the same base
+    # language), otherwise the original track rather than an automatic dub.
+    audio_prefs = [ORIGINAL_AUDIO]
+    language = re.sub(r'[^A-Za-z0-9-]', '', str(audio_language or ''))
+    if language:
+        base = language.split('-')[0]
+        audio_prefs = [f'[language={language}][format_id!*=drc]', f'[language^={base}][format_id!*=drc]', ORIGINAL_AUDIO]
+
     if media_type == 'audio':
         # Handle audio quality selection (bitrate)
         if quality and quality.isdigit():
@@ -600,9 +608,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
             audio_bitrate = '192' # Default
             
         # Prefer quality up to the selected bitrate to save bandwidth
-        ydl_opts['format'] = (
-            f'bestaudio[abr<={audio_bitrate}]{ORIGINAL_AUDIO}/bestaudio{ORIGINAL_AUDIO}/'
-            f'bestaudio[abr<={audio_bitrate}]/bestaudio[ext=m4a]/bestaudio/best[height<=360]/best'
+        ydl_opts['format'] = '/'.join(
+            [alt for pref in audio_prefs for alt in (f'bestaudio[abr<={audio_bitrate}]{pref}', f'bestaudio{pref}')]
+            + [f'bestaudio[abr<={audio_bitrate}]', 'bestaudio[ext=m4a]', 'bestaudio', 'best[height<=360]', 'best']
         )
         ydl_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
@@ -613,15 +621,18 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     else:
         # Format mapping for better control
         if quality == 'best':
-            format_str = (
-                f'bestvideo[ext=mp4]+bestaudio[ext=m4a]{ORIGINAL_AUDIO}/bestvideo+bestaudio{ORIGINAL_AUDIO}/'
-                'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+            format_str = '/'.join(
+                [alt for pref in audio_prefs for alt in (f'bestvideo[ext=mp4]+bestaudio[ext=m4a]{pref}', f'bestvideo+bestaudio{pref}')]
+                + ['bestvideo[ext=mp4]+bestaudio[ext=m4a]', 'bestvideo+bestaudio', 'best']
             )
         else:
             # Prefer MP4 video + M4A audio so yt-dlp does not fall back to a low progressive format.
-            format_str = (
-                f'bestvideo[ext=mp4][height<={quality}]+bestaudio[ext=m4a]{ORIGINAL_AUDIO}/'
-                f'bestvideo[height<={quality}]+bestaudio{ORIGINAL_AUDIO}/'
+            format_str = '/'.join(
+                [alt for pref in audio_prefs for alt in (
+                    f'bestvideo[ext=mp4][height<={quality}]+bestaudio[ext=m4a]{pref}',
+                    f'bestvideo[height<={quality}]+bestaudio{pref}',
+                )]
+            ) + '/' + (
                 f'bestvideo[ext=mp4][height<={quality}]+bestaudio[ext=m4a]/'
                 f'bestvideo[height<={quality}]+bestaudio/'
                 f'best[ext=mp4][height<={quality}]/best[height<={quality}]'
@@ -642,13 +653,20 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     
     if media_type == 'transcript':
         # Prepare for whisper transcription - we need the audio; use low quality to save weight
-        ydl_opts['format'] = f'bestaudio[abr<=64]{ORIGINAL_AUDIO}/bestaudio{ORIGINAL_AUDIO}/bestaudio[abr<=64]/bestaudio[ext=m4a]/bestaudio/best'
+        ydl_opts['format'] = '/'.join(
+            [alt for pref in audio_prefs for alt in (f'bestaudio[abr<=64]{pref}', f'bestaudio{pref}')]
+            + ['bestaudio[abr<=64]', 'bestaudio[ext=m4a]', 'bestaudio', 'best']
+        )
         ydl_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '128',
         }]
         ydl_opts['outtmpl'] = os.path.join(output_path, '%(title)s_audio.%(ext)s')
+
+    if filename_prefix:
+        safe_prefix = str(filename_prefix).replace('%', '%%').replace('/', '_').replace('\\', '_')
+        ydl_opts['outtmpl'] = ydl_opts['outtmpl'].replace('%(title)s', safe_prefix + '%(title)s')
 
     if is_threads_url(url):
         # yt-dlp has no Threads extractor: read the post ourselves and hand

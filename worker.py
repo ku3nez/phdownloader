@@ -688,6 +688,74 @@ def process_transcription_chunk(task_id: str, chunk_id: str) -> None:
 
 
 @with_task_heartbeat
+def process_playlist_item(task_id: str, chunk_id: str) -> None:
+    """Download one episode of a playlist/series task."""
+    import batch
+
+    task = store.get_task(task_id) or {}
+    chunk = store.get_chunk(task_id, chunk_id) or {}
+    if not task or not chunk:
+        return
+    if task.get("status") in TERMINAL_TASK_STATUSES or store.is_cancelled(task_id):
+        store.update_chunk(task_id, chunk_id, status="cancelled", last_status="Task already finished or cancelled.")
+        batch.refresh(store, task_id)
+        return
+    if chunk.get("status") in batch.ITEM_TERMINAL:
+        return
+    store.update_chunk(task_id, chunk_id, status="processing", worker_node=NODE_NAME, error=None, progress=0)
+    url = chunk["url"]
+    log_event(task_id, f"playlist item {chunk.get('index')} worker_node={NODE_NAME} url={url}")
+    items_dir = os.path.join(TASKS_ROOT, task_id, "items")
+    os.makedirs(items_dir, exist_ok=True)
+    last_update = [0.0]
+
+    def on_progress(info: dict) -> None:
+        if info.get("type") == "progress":
+            now = time.time()
+            if now - last_update[0] < 1.0 and float(info.get("percentage") or 0) < 100:
+                return
+            last_update[0] = now
+            store.update_chunk(task_id, chunk_id, progress=round(float(info.get("percentage") or 0), 1),
+                               details={k: info.get(k) for k in ("speed", "downloaded", "total", "eta")})
+            batch.refresh(store, task_id)
+        elif info.get("type") == "status":
+            store.update_chunk(task_id, chunk_id, last_status=info.get("msg"))
+            if str(info.get("msg", "")).startswith(("ERROR", "WARNING")):
+                store.append_log(task_id, f"[{chunk.get('index')}] {info.get('msg')}")
+
+    width = len(str(task.get("total_chunks") or 99))
+    prefix = f"{int(chunk.get('index') or 0):0{max(2, width)}d}. "
+    try:
+        filename = download_media(
+            url,
+            output_path=items_dir,
+            quality=str(task.get("quality") or "720"),
+            media_type=str(task.get("download_type") or "video"),
+            structured=bool(task.get("structured", True)),
+            progress_callback=on_progress,
+            check_cancel=lambda: store.is_cancelled(task_id),
+            audio_language=task.get("audio_language") or None,
+            filename_prefix=prefix,
+        )
+        if not filename or not os.path.exists(filename):
+            raise RuntimeError("Download finished without output file")
+        if task.get("server_only"):
+            server_path = os.path.join(os.path.dirname(filename), "[SERVER] " + os.path.basename(filename))
+            os.replace(filename, server_path)
+            filename = server_path
+        store.update_chunk(task_id, chunk_id, status="completed", progress=100, filename=filename,
+                           size=os.path.getsize(filename), last_status="Done")
+        log_download_link(url, filename)
+        log_event(task_id, f"playlist item {chunk.get('index')} completed filename={filename}")
+    except Exception as exc:
+        cancelled = store.is_cancelled(task_id) or "cancelled" in str(exc).lower()
+        store.update_chunk(task_id, chunk_id, status="cancelled" if cancelled else "failed", error=str(exc)[:500])
+        log_event(task_id, f"playlist item {chunk.get('index')} {'cancelled' if cancelled else 'failed'}: {exc}")
+    finally:
+        batch.refresh(store, task_id)
+
+
+@with_task_heartbeat
 def process_remote_media(task_id: str, url: str, quality: str = "720", download_type: str = "video", structured: bool = True, model_size: str = "small", server_only: bool = False) -> None:
     store.set_status(task_id, "processing", worker_node=NODE_NAME)
     task_dir = os.path.join(TASKS_ROOT, task_id)
@@ -713,6 +781,7 @@ def process_remote_media(task_id: str, url: str, quality: str = "720", download_
             progress_callback=lambda info: update_from_callback(task_id, info),
             metadata_callback=update_metadata,
             check_cancel=lambda: check_cancel(task_id),
+            audio_language=(store.get_task(task_id) or {}).get("audio_language") or None,
         )
         if not filename or not os.path.exists(filename):
             raise RuntimeError("Download finished without output file")

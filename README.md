@@ -38,6 +38,8 @@ A web application for downloading media and creating transcripts. Flask accepts 
 - **Cancellation and cleanup:** queued/running tasks can be cancelled. Expired completed task directories are removed automatically; active tasks are protected by an `.active` marker.
 - **Shared storage:** API and workers use `SHARED_STORAGE_ROOT`; it must point to the same mounted directory on every node that participates in a cluster.
 - **Source-link audit log:** each successful remote media download is appended to `${SHARED_STORAGE_ROOT}/download_links.log`, independent of which worker processed it.
+- **Playlists and series:** a playlist, channel or series link (anything yt-dlp lists as a playlist) shows a grid of its videos; pick all, some (click, Shift+click, or a range like `1-10, 15`) and download them as video, audio or subtitles. Every video is its own job, so several nodes download in parallel; the page shows one bar per video with a download link, plus a ZIP of everything (streamed, no temporary archive). Files are kept for `BATCH_FILE_EXPIRATION_SECONDS` (3 h).
+- **Audio track choice:** when a video has several audio tracks (e.g. YouTube dubs), the page offers them; the chosen language is used for every video of a playlist, falling back to the original track where it is missing.
 - **Transcription log:** every finished transcription (completed, failed or cancelled) adds one tab-separated line to `${SHARED_STORAGE_ROOT}/transcripts.log`: finish time (UTC), status, task id, nodes, audio length, processing time, engine, language, speakers (count and names found in the text), source link or uploaded file name, result file and error. The line is written once by whichever node ends the task.
 - **Optional Telegram publication:** PornHub video requests can be marked for MTProto publication after download. The message caption is the downloaded title without its extension or quality suffix.
 
@@ -115,6 +117,8 @@ Set configuration values in `.env`. Do not commit that file.
 | `TRANSCRIPTION_CHUNK_RETRY_DELAY_SECONDS` | `10` | Pause inside the failed chunk job before it is requeued. |
 | `DOWNLOAD_LINKS_LOG_PATH` | `${SHARED_STORAGE_ROOT}/download_links.log` | Optional explicit path for the successful-download source-link log. |
 | `TRANSCRIPTS_LOG_PATH` | `${SHARED_STORAGE_ROOT}/transcripts.log` | Optional explicit path for the transcription log. |
+| `BATCH_FILE_EXPIRATION_SECONDS` | `10800` | How long downloaded playlist videos stay on the server. |
+| `PLAYLIST_MAX_ENTRIES` / `PLAYLIST_MAX_ITEMS` | `500` / `300` | Videos listed from one playlist / downloadable in one task. |
 | `YT_DLP_CONCURRENT_FRAGMENT_DOWNLOADS` | `4` | Simultaneous HLS fragments, clamped to 1–32. Raise this on capable worker nodes to improve HLS download throughput. |
 | `YT_DLP_COOKIE_FILE` | `cookies.txt` | Optional Netscape cookie file for sites that require an authenticated session. Every node that may process a task must have an up-to-date copy at this path. A configured but missing file is reported in the task log. |
 | `YT_DLP_COOKIES_BROWSER` | unset | Optional browser name used to read local cookies on the worker. |
