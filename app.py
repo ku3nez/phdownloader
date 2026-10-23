@@ -394,6 +394,7 @@ def start_download():
     if file:
         filename = normalize_uploaded_filename(file)
         file_path = os.path.join(task_dir(task_id), filename)
+        store.update_task(task_id, source_name=filename)
         store.append_log(task_id, f"[{task_id}] Saving uploaded file filename={filename} content_type={file.content_type} content_length={request.content_length}")
         file.save(file_path)
         saved_size = os.path.getsize(file_path) if os.path.exists(file_path) else -1

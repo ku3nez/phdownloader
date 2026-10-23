@@ -65,6 +65,26 @@ class TaskStore:
         payload = {k: self._encode(v) for k, v in fields.items()}
         payload["updated_at"] = str(utc_ts())
         self.redis.hset(self.task_key(task_id), mapping=payload)
+        if fields.get("status") in TERMINAL_TASK_STATUSES:
+            self._log_finished_transcript(task_id, str(fields["status"]))
+
+    def _log_finished_transcript(self, task_id: str, status: str) -> None:
+        """Append a transcripts.log line once, whichever node ends the task."""
+        try:
+            raw = self.redis.hgetall(self.task_key(task_id))
+            if not raw or raw.get("download_type") != "transcript":
+                return
+            # A task can be set terminal twice (cancel, then the worker's own
+            # failure); only the first one is logged.
+            if not self.redis.set(f"phd:task:{task_id}:journaled", status, nx=True, ex=30 * 86400):
+                return
+            from transcript_log import append_entry, format_entry
+
+            task = {k: self._decode(v) for k, v in raw.items()}
+            task["task_id"] = task_id
+            append_entry(format_entry(task, self.get_chunks(task_id), status, time.time()))
+        except Exception as exc:
+            print(f"[{task_id}] transcripts log failed: {exc}", flush=True)
 
     def touch_task(self, task_id: str) -> bool:
         """Record a worker heartbeat for an active task."""

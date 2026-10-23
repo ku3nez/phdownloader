@@ -38,6 +38,7 @@ A web application for downloading media and creating transcripts. Flask accepts 
 - **Cancellation and cleanup:** queued/running tasks can be cancelled. Expired completed task directories are removed automatically; active tasks are protected by an `.active` marker.
 - **Shared storage:** API and workers use `SHARED_STORAGE_ROOT`; it must point to the same mounted directory on every node that participates in a cluster.
 - **Source-link audit log:** each successful remote media download is appended to `${SHARED_STORAGE_ROOT}/download_links.log`, independent of which worker processed it.
+- **Transcription log:** every finished transcription (completed, failed or cancelled) adds one tab-separated line to `${SHARED_STORAGE_ROOT}/transcripts.log`: finish time (UTC), status, task id, nodes, audio length, processing time, engine, language, speakers (count and names found in the text), source link or uploaded file name, result file and error. The line is written once by whichever node ends the task.
 - **Optional Telegram publication:** PornHub video requests can be marked for MTProto publication after download. The message caption is the downloaded title without its extension or quality suffix.
 
 ### Web interface
@@ -113,6 +114,7 @@ Set configuration values in `.env`. Do not commit that file.
 | `TRANSCRIPTION_CHUNK_RETRIES` | `2` | Extra attempts for a failed distributed transcription chunk before the whole task fails. Retries are requeued immediately, so no RQ scheduler is required. |
 | `TRANSCRIPTION_CHUNK_RETRY_DELAY_SECONDS` | `10` | Pause inside the failed chunk job before it is requeued. |
 | `DOWNLOAD_LINKS_LOG_PATH` | `${SHARED_STORAGE_ROOT}/download_links.log` | Optional explicit path for the successful-download source-link log. |
+| `TRANSCRIPTS_LOG_PATH` | `${SHARED_STORAGE_ROOT}/transcripts.log` | Optional explicit path for the transcription log. |
 | `YT_DLP_CONCURRENT_FRAGMENT_DOWNLOADS` | `4` | Simultaneous HLS fragments, clamped to 1–32. Raise this on capable worker nodes to improve HLS download throughput. |
 | `YT_DLP_COOKIE_FILE` | `cookies.txt` | Optional Netscape cookie file for sites that require an authenticated session. Every node that may process a task must have an up-to-date copy at this path. A configured but missing file is reported in the task log. |
 | `YT_DLP_COOKIES_BROWSER` | unset | Optional browser name used to read local cookies on the worker. |
