@@ -378,6 +378,28 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
 ORIGINAL_AUDIO = '[format_note*=original][format_id!*=drc]'
 
 
+def _private_cookie_copy(path):
+    import glob
+    import shutil
+    import tempfile
+
+    folder = os.path.join(tempfile.gettempdir(), 'phd-cookies')
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    for old in glob.glob(os.path.join(folder, '*.txt')):
+        try:
+            if time.time() - os.path.getmtime(old) > 6 * 3600:
+                os.remove(old)
+        except OSError:
+            pass
+    copy = os.path.join(folder, f'{os.getpid()}.txt')
+    try:
+        shutil.copyfile(path, copy)
+        os.chmod(copy, 0o600)
+        return copy
+    except OSError:
+        return path
+
+
 def download_media(url, output_path='downloads', quality='720', media_type='video', structured=True, model_size='base', progress_callback=None, metadata_callback=None, check_cancel=None, audio_language=None, filename_prefix=''):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -487,6 +509,10 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     fragment_concurrency = max(1, min(fragment_concurrency, 32))
 
     active_cookie_file = cookie_file if cookie_file and os.path.exists(cookie_file) else None
+    if active_cookie_file:
+        # The cookie file is shared by all nodes and refreshed by the cookie
+        # keeper; yt-dlp writes cookies back, so each job uses its own copy.
+        active_cookie_file = _private_cookie_copy(active_cookie_file)
     if configured_cookie_file and not active_cookie_file:
         msg = f"WARNING: Configured cookie file is unavailable: {configured_cookie_file}. Continuing without cookies."
         print(msg)

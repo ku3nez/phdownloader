@@ -1,0 +1,9 @@
+[Unit]
+Description=phdownloader: refresh YouTube cookies from the server-side browser profile
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/phdownloader/deploy/cookies/refresh.sh
+TimeoutStartSec=300

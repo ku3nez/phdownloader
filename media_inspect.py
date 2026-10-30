@@ -27,6 +27,22 @@ class _QuietLogger:
         print(f"inspect: {msg}", flush=True)
 
 
+def _cookie_copy(path):
+    """yt-dlp writes cookies back; never let it touch the shared file."""
+    import shutil
+    import tempfile
+
+    folder = os.path.join(tempfile.gettempdir(), "phd-cookies")
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    copy = os.path.join(folder, f"inspect-{os.getpid()}.txt")
+    try:
+        shutil.copyfile(path, copy)
+        os.chmod(copy, 0o600)
+        return copy
+    except OSError:
+        return None
+
+
 def _options(url, flat):
     cookie_file = os.getenv("YT_DLP_COOKIE_FILE") or "cookies.txt"
     js_runtimes = [item.strip() for item in os.getenv("YT_DLP_JS_RUNTIME", "deno,node").split(",") if item.strip()]
@@ -40,7 +56,7 @@ def _options(url, flat):
         "skip_download": True,
         "playlistend": MAX_ENTRIES,
         "socket_timeout": 30,
-        "cookiefile": cookie_file if os.path.exists(cookie_file) else None,
+        "cookiefile": _cookie_copy(cookie_file) if os.path.exists(cookie_file) else None,
         "js_runtimes": {runtime: {} for runtime in js_runtimes} or None,
         "remote_components": ["ejs:github"],
         "proxy": (youtube_proxy if youtube and youtube_proxy else proxy) or None,
