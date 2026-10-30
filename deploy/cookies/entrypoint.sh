@@ -1,6 +1,8 @@
 #!/bin/bash
 # login   - Chromium on a virtual screen, reachable through noVNC on :6081, to
 #           sign in to the Google account once by hand.
+# import  - load a cookies.txt exported elsewhere (/import/cookies.txt) into
+#           the profile, then export as in refresh.
 # refresh - headless Chromium with the same profile opens YouTube and writes
 #           the current cookies to /out/youtube.txt.
 set -euo pipefail
@@ -26,7 +28,11 @@ chromium "${FLAGS[@]}" --headless=new --remote-debugging-address=127.0.0.1 --rem
   about:blank >/tmp/chromium.log 2>&1 &
 BROWSER=$!
 status=0
-python3 /app/cookie_keeper.py /out/youtube.txt || status=$?
+if [ "$MODE" = import ]; then
+  python3 /app/cookie_keeper.py /out/youtube.txt /import/cookies.txt || status=$?
+else
+  python3 /app/cookie_keeper.py /out/youtube.txt || status=$?
+fi
 kill "$BROWSER" 2>/dev/null || true
 wait "$BROWSER" 2>/dev/null || true
 exit $status

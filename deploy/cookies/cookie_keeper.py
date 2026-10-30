@@ -58,8 +58,43 @@ def netscape(cookies):
     return "\n".join(lines) + "\n"
 
 
-def main(out_path):
+def load_netscape(path):
+    """Netscape cookies.txt -> DevTools CookieParam list."""
+    cookies = []
+    for line in open(path, encoding="utf-8", errors="replace"):
+        line = line.rstrip("\n")
+        http_only = line.startswith("#HttpOnly_")
+        if http_only:
+            line = line[len("#HttpOnly_"):]
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 7:
+            continue
+        domain, _, path_, secure, expires, name, value = parts[:7]
+        if not domain.lstrip(".").endswith(DOMAINS):
+            continue
+        cookie = {"name": name, "value": value, "domain": domain, "path": path_ or "/",
+                  "secure": secure.upper() == "TRUE", "httpOnly": http_only}
+        if expires.isdigit() and int(expires) > 0:
+            cookie["expires"] = int(expires)
+        if name.startswith("__Secure-") or name.startswith("__Host-"):
+            cookie["secure"] = True
+        cookies.append(cookie)
+    return cookies
+
+
+def main(out_path, import_path=None):
     wait_for_browser()
+    if import_path:
+        # Put cookies from a browser on another computer into this profile;
+        # from then on the profile keeps the session going by itself.
+        request = urllib.request.Request(f"{DEBUG}/json/new?about:blank", method="PUT")
+        blank = Tab(json.load(urllib.request.urlopen(request, timeout=30))["webSocketDebuggerUrl"])
+        cookies = load_netscape(import_path)
+        blank.call("Network.enable")
+        blank.call("Network.setCookies", cookies=cookies)
+        print(f"imported {len(cookies)} cookies")
     request = urllib.request.Request(f"{DEBUG}/json/new?https://www.youtube.com/", method="PUT")
     target = json.load(urllib.request.urlopen(request, timeout=30))
     tab = Tab(target["webSocketDebuggerUrl"])
@@ -92,4 +127,4 @@ def main(out_path):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1]))
+    sys.exit(main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None))

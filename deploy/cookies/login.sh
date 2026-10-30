@@ -15,6 +15,15 @@ case "${1:-start}" in
     IP=$(curl -s -4 --max-time 5 https://api.ipify.org || hostname -I | awk '{print $1}')
     echo "Open http://$IP:6081/vnc.html  password: $PASS"
     ;;
+  import)
+    # login.sh import /path/cookies.txt
+    mkdir -p "$PROFILE" && chmod 700 /var/lib/phd-cookies
+    docker rm -f phd-cookies-login >/dev/null 2>&1 || true
+    DIR=$(mktemp -d); cp "$2" "$DIR/cookies.txt"; chmod 600 "$DIR/cookies.txt"
+    docker run --rm --shm-size=512m -v "$PROFILE":/profile -v /mnt/phdownloader/cookies:/out -v "$DIR":/import:ro phd-cookies import
+    rm -rf "$DIR"
+    cd /opt/phdownloader && venv/bin/python cookie_check.py /mnt/phdownloader/cookies/youtube.txt /mnt/phdownloader/cookies/status.json
+    ;;
   stop)
     docker rm -f phd-cookies-login >/dev/null 2>&1 || true
     systemctl start phdownloader-cookies.service
