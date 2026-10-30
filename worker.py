@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from rq import Retry, get_current_job
 
 from cluster_config import (
+    RQ_YOUTUBE_QUEUE_NAME,
     RQ_TELEGRAM_QUEUE_NAME,
     RQ_TRANSCRIPT_QUEUE_NAME,
     SHARED_STORAGE_ROOT,
@@ -27,6 +28,7 @@ from cluster_config import (
     TRANSCRIPTION_MIN_DISTRIBUTED_SECONDS,
 )
 from asr_routing import asr_engine_for_language, normalize_language
+from media_urls import is_youtube_url
 from downloader import detect_language, download_media, get_media_duration, transcribe_with_whisper
 from task_store import TaskStore
 
@@ -687,6 +689,77 @@ def process_transcription_chunk(task_id: str, chunk_id: str) -> None:
         raise
 
 
+# --- YouTube bot-check failover --------------------------------------------
+# YouTube sometimes starts answering one server's IP with "Sign in to confirm
+# you're not a bot". That node marks itself blocked for a while and hands the
+# job back to the YouTube queue, so a node YouTube still accepts takes it.
+YOUTUBE_BLOCK_TTL_SECONDS = int(os.getenv("YOUTUBE_BLOCK_TTL_SECONDS", 6 * 3600))
+YOUTUBE_MAX_HANDOFFS = int(os.getenv("YOUTUBE_MAX_HANDOFFS", 4))
+HOST_KEY = socket.gethostname()
+
+
+def is_youtube_bot_check(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "not a bot" in text and ("confirm you" in text or "rejected this server" in text)
+
+
+def youtube_block_key(host: str) -> str:
+    return f"phd:youtube-blocked:{host}"
+
+
+def youtube_blocked(host: str = HOST_KEY) -> bool:
+    try:
+        return bool(store.redis.exists(youtube_block_key(host)))
+    except Exception:
+        return False
+
+
+def mark_youtube_blocked(task_id: str) -> None:
+    store.redis.set(youtube_block_key(HOST_KEY), str(int(time.time())), ex=YOUTUBE_BLOCK_TTL_SECONDS)
+    log_event(task_id, f"YouTube bot check on {NODE_NAME}; this node skips YouTube for {YOUTUBE_BLOCK_TTL_SECONDS // 3600} h")
+
+
+def other_youtube_node_available() -> bool:
+    """Another live worker on the YouTube queue whose node is not blocked."""
+    from rq import Worker
+
+    try:
+        for worker in Worker.all(connection=store.rq_redis):
+            if worker.hostname == HOST_KEY or youtube_blocked(worker.hostname):
+                continue
+            if RQ_YOUTUBE_QUEUE_NAME in worker.queue_names():
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def hand_off_youtube(task_id: str, func: str, *args, chunk_id: str | None = None, skip: bool = False, **kwargs) -> bool:
+    """Put the job back on the YouTube queue for another node. False if not possible.
+
+    skip=True: this node is known to be blocked and has not tried. It waits a
+    little first so that a free node, not this one again, picks the job up.
+    """
+    task = store.get_task(task_id) or {}
+    counter = "youtube_skips" if skip else "youtube_handoffs"
+    limit = 240 if skip else YOUTUBE_MAX_HANDOFFS
+    count = int(task.get(counter) or 0)
+    if count >= limit or not other_youtube_node_available():
+        return False
+    if skip:
+        time.sleep(15)
+    store.update_task(task_id, **{counter: count + 1})
+    job = store.enqueue(func, task_id, *args, queue_name=RQ_YOUTUBE_QUEUE_NAME, **kwargs)
+    if chunk_id:
+        store.update_chunk(task_id, chunk_id, status="queued", progress=0, rq_job_id=job.id, worker_node=None,
+                           last_status=f"YouTube blocked {NODE_NAME}; handed to another server")
+    else:
+        store.set_status(task_id, "queued", rq_job_id=job.id, queue_name=job.origin, progress=0, error=None,
+                         current_status=f"YouTube blocked {NODE_NAME}; handed to another server")
+    log_event(task_id, f"handed YouTube job to another node rq_job_id={job.id}")
+    return True
+
+
 @with_task_heartbeat
 def process_playlist_item(task_id: str, chunk_id: str) -> None:
     """Download one episode of a playlist/series task."""
@@ -702,8 +775,10 @@ def process_playlist_item(task_id: str, chunk_id: str) -> None:
         return
     if chunk.get("status") in batch.ITEM_TERMINAL:
         return
-    store.update_chunk(task_id, chunk_id, status="processing", worker_node=NODE_NAME, error=None, progress=0)
     url = chunk["url"]
+    if is_youtube_url(url) and youtube_blocked() and hand_off_youtube(task_id, "worker.process_playlist_item", chunk_id, chunk_id=chunk_id, skip=True):
+        return
+    store.update_chunk(task_id, chunk_id, status="processing", worker_node=NODE_NAME, error=None, progress=0)
     log_event(task_id, f"playlist item {chunk.get('index')} worker_node={NODE_NAME} url={url}")
     items_dir = os.path.join(TASKS_ROOT, task_id, "items")
     os.makedirs(items_dir, exist_ok=True)
@@ -748,6 +823,10 @@ def process_playlist_item(task_id: str, chunk_id: str) -> None:
         log_download_link(url, filename)
         log_event(task_id, f"playlist item {chunk.get('index')} completed filename={filename}")
     except Exception as exc:
+        if is_youtube_url(url) and is_youtube_bot_check(exc):
+            mark_youtube_blocked(task_id)
+            if hand_off_youtube(task_id, "worker.process_playlist_item", chunk_id, chunk_id=chunk_id):
+                return
         cancelled = store.is_cancelled(task_id) or "cancelled" in str(exc).lower()
         store.update_chunk(task_id, chunk_id, status="cancelled" if cancelled else "failed", error=str(exc)[:500])
         log_event(task_id, f"playlist item {chunk.get('index')} {'cancelled' if cancelled else 'failed'}: {exc}")
@@ -757,6 +836,10 @@ def process_playlist_item(task_id: str, chunk_id: str) -> None:
 
 @with_task_heartbeat
 def process_remote_media(task_id: str, url: str, quality: str = "720", download_type: str = "video", structured: bool = True, model_size: str = "small", server_only: bool = False) -> None:
+    job_kwargs = dict(quality=quality, download_type=download_type, structured=structured,
+                      model_size=model_size, server_only=server_only)
+    if is_youtube_url(url) and youtube_blocked() and hand_off_youtube(task_id, "worker.process_remote_media", url, skip=True, **job_kwargs):
+        return
     store.set_status(task_id, "processing", worker_node=NODE_NAME)
     task_dir = os.path.join(TASKS_ROOT, task_id)
     os.makedirs(task_dir, exist_ok=True)
@@ -816,6 +899,10 @@ def process_remote_media(task_id: str, url: str, quality: str = "720", download_
         else:
             remove_active_marker(active_marker)
     except Exception as exc:
+        if is_youtube_url(url) and is_youtube_bot_check(exc):
+            mark_youtube_blocked(task_id)
+            if hand_off_youtube(task_id, "worker.process_remote_media", url, **job_kwargs):
+                return
         store.set_status(task_id, "failed", error=str(exc))
         log_event(task_id, f"failed: {exc}")
         log_event(task_id, traceback.format_exc())
