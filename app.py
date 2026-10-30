@@ -84,8 +84,11 @@ def is_waiting_for_worker(task: dict) -> bool:
     if task.get("status") == "queued":
         job_id = task.get("rq_job_id")
         # The job ID is written right after enqueue; without it the task is
-        # still being created.
-        return not job_id or store.get_job_status(job_id) in RQ_WAITING_STATUSES
+        # still being created (an upload can take a while). If it never got a
+        # job the watchdog fails it after the normal stall timeout.
+        if not job_id:
+            return False
+        return store.get_job_status(job_id) in RQ_WAITING_STATUSES
     if task.get("processing_mode") in ("distributed", batch.BATCH_MODE):
         for chunk in task.get("chunks", []):
             if chunk.get("status") in {"queued", "processing"} and store.get_job_status(chunk.get("rq_job_id")) in RQ_WAITING_STATUSES:
@@ -407,9 +410,26 @@ def start_download():
     store.save_task(task_id, task)
     store.append_log(task_id, f"[{task_id}] Task created on API node remote_addr={request.remote_addr}")
 
-    if items:
-        return start_batch(task_id, items, request.remote_addr)
+    try:
+        if items:
+            return start_batch(task_id, items, request.remote_addr)
+        return enqueue_start(task_id, url, file, quality, download_type, structured, model_size, server_only, publish_to_telegram)
+    except Exception as exc:
+        # Without this the task stayed "queued" with no job behind it and
+        # failed only after the 3-hour queue timeout.
+        log_event("HTTP", f"start failed task_id={task_id}: {exc}")
+        try:
+            store.set_status(task_id, "failed", error=f"Could not queue the task: {exc}",
+                             current_status="Task failed: the queue is unavailable.")
+            remove_active_marker(task_id)
+        except Exception:
+            pass
+        message = ("Сервер очереди временно недоступен, попробуйте ещё раз через минуту."
+                   if is_russian else "The task queue is temporarily unavailable, please try again in a minute.")
+        return jsonify({"error": message}), 503
 
+
+def enqueue_start(task_id, url, file, quality, download_type, structured, model_size, server_only, publish_to_telegram):
     if file:
         filename = normalize_uploaded_filename(file)
         file_path = os.path.join(task_dir(task_id), filename)

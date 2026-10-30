@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from redis import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 from rq import Queue
 from rq.job import Job
 
@@ -33,8 +34,12 @@ return 1
 
 class TaskStore:
     def __init__(self):
-        self.redis = Redis.from_url(REDIS_URL, decode_responses=True)
-        self.rq_redis = Redis.from_url(REDIS_URL, decode_responses=False)
+        # Long-lived processes keep idle sockets; after a network blip the
+        # first command on such a socket failed with "Broken pipe". The health
+        # check pings an idle connection before use and reconnects if needed.
+        options = {"health_check_interval": 30, "socket_keepalive": True}
+        self.redis = Redis.from_url(REDIS_URL, decode_responses=True, **options)
+        self.rq_redis = Redis.from_url(REDIS_URL, decode_responses=False, **options)
         self.default_queue_name = RQ_DEFAULT_QUEUE_NAME
         self._touch_task_script = self.redis.register_script(_TOUCH_TASK_SCRIPT)
         self.owner_id = f"{socket.gethostname()}:{os.getpid()}"
@@ -225,7 +230,13 @@ class TaskStore:
             default_timeout=RQ_JOB_TIMEOUT,
             result_ttl=RQ_RESULT_TTL,
         )
-        return queue.enqueue(func, *args, **kwargs)
+        try:
+            return queue.enqueue(func, *args, **kwargs)
+        except RedisConnectionError:
+            # One retry on a fresh connection: enqueue is a transaction that
+            # redis-py does not retry by itself.
+            self.rq_redis.connection_pool.disconnect()
+            return queue.enqueue(func, *args, **kwargs)
 
     def get_job_status(self, job_id: str | None) -> str | None:
         if not job_id:
