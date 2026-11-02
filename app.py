@@ -50,6 +50,9 @@ _redis_target = __import__("urllib.parse").parse.urlparse(REDIS_URL)
 url_guard.install([(_redis_target.hostname, _redis_target.port or 6379)])
 
 app = Flask(__name__)
+# Uploads larger than this are refused before they reach the disk.
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", 1024 ** 3))
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 app.secret_key = "supersecretkey"
 store = TaskStore()
 
@@ -304,6 +307,12 @@ def is_uploaded_video_file(file) -> bool:
     return bool(file.content_type and file.content_type.startswith("video/")) or extension in {".mp4", ".mov", ".mkv", ".avi", ".webm"}
 
 
+@app.errorhandler(413)
+def upload_too_large(_error):
+    gigabytes = MAX_UPLOAD_BYTES / 1024 ** 3
+    return jsonify({"error": f"Файл больше {gigabytes:g} ГБ. / The file is larger than {gigabytes:g} GB."}), 413
+
+
 @app.before_request
 def refuse_banned_clients():
     if request.endpoint in (None, "static"):
@@ -317,6 +326,7 @@ def refuse_banned_clients():
 def index():
     return render_template(
         "index.html",
+        max_upload_bytes=MAX_UPLOAD_BYTES,
         enable_save_on_server=ENABLE_SAVE_ON_SERVER,
         default_quality=DEFAULT_VIDEO_QUALITY,
     )

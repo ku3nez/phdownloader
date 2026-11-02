@@ -1223,7 +1223,16 @@
             updateTelegramPublishVisibility();
         }
 
+        const MAX_UPLOAD_BYTES = {{ max_upload_bytes|int }};
+
         function handleFileSelect(input) {
+            const picked = input.files && input.files[0];
+            if (picked && picked.size > MAX_UPLOAD_BYTES) {
+                const limit = (MAX_UPLOAD_BYTES / 1024 ** 3).toLocaleString();
+                alert(isRussian ? `Файл больше ${limit} ГБ — такой не загрузить.` : `The file is larger than ${limit} GB and cannot be uploaded.`);
+                input.value = '';
+                return;
+            }
             const file = input.files[0];
             const dragAreaText = document.getElementById('dragAreaText');
             if (file) {

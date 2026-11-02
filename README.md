@@ -121,6 +121,7 @@ Set configuration values in `.env`. Do not commit that file.
 | `TRANSCRIPTION_CHUNK_RETRY_DELAY_SECONDS` | `10` | Pause inside the failed chunk job before it is requeued. |
 | `DOWNLOAD_LINKS_LOG_PATH` | `${SHARED_STORAGE_ROOT}/download_links.log` | Optional explicit path for the successful-download source-link log. |
 | `TRANSCRIPTS_LOG_PATH` | `${SHARED_STORAGE_ROOT}/transcripts.log` | Optional explicit path for the transcription log. |
+| `MAX_UPLOAD_BYTES` | `1073741824` | Largest accepted upload (1 GB); bigger files are refused with HTTP 413. |
 | `BATCH_FILE_EXPIRATION_SECONDS` | `10800` | How long downloaded playlist videos stay on the server. |
 | `PLAYLIST_MAX_ENTRIES` / `PLAYLIST_MAX_ITEMS` | `500` / `300` | Videos listed from one playlist / downloadable in one task. |
 | `YT_DLP_CONCURRENT_FRAGMENT_DOWNLOADS` | `4` | Simultaneous HLS fragments, clamped to 1–32. Raise this on capable worker nodes to improve HLS download throughput. |
