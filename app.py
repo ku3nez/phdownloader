@@ -11,6 +11,7 @@ from flask import Flask, Response, jsonify, render_template, request, send_file
 
 from cluster_config import (
     APP_PORT,
+    REDIS_URL,
     CLEANUP_INTERVAL_SECONDS,
     DEFAULT_VIDEO_QUALITY,
     ENABLE_SAVE_ON_SERVER,
@@ -29,6 +30,7 @@ from asr_routing import FAST_ENGINES, normalize_language, normalize_whisper_mode
 from media_urls import is_pornhub_url, is_youtube_url
 from task_store import RQ_WAITING_STATUSES, TaskStore
 import batch
+import url_guard
 
 
 def safe_print(*args, **kwargs):
@@ -41,6 +43,9 @@ def safe_print(*args, **kwargs):
 
 print = safe_print
 load_dotenv()
+
+_redis_target = __import__("urllib.parse").parse.urlparse(REDIS_URL)
+url_guard.install([(_redis_target.hostname, _redis_target.port or 6379)])
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -377,6 +382,12 @@ def start_download():
     log_event("HTTP", f"Parsed start payload url_present={bool(url)} file_present={bool(file)} quality={quality} download_type={download_type} structured={structured} model_size={model_size} language={language} server_only={server_only} publish_to_telegram={publish_to_telegram}")
     if not url and not file and not items:
         return jsonify({"error": "URL or File is required"}), 400
+    try:
+        for link in ([url] if url and not file else []) + [item["url"] for item in items]:
+            url_guard.check_public_url(link)
+    except url_guard.BlockedURL as exc:
+        log_event("HTTP", f"rejected link from {request.remote_addr}: {exc}")
+        return jsonify({"error": ("Эта ссылка не поддерживается: " if is_russian else "This link is not supported: ") + str(exc)}), 400
     if file and download_type != "transcript" and not publish_to_telegram:
         return jsonify({"error": "Uploaded files are supported only for transcription or Telegram video publishing"}), 400
 
@@ -529,6 +540,10 @@ def inspect_link():
     """Playlist episodes and audio tracks of a link, for the page to offer a choice."""
     url = str((request.get_json(silent=True) or {}).get("url") or "").strip()
     if not url.startswith(("http://", "https://")) or is_pornhub_url(url):
+        return jsonify({"kind": "unknown"})
+    try:
+        url_guard.check_public_url(url)
+    except url_guard.BlockedURL:
         return jsonify({"kind": "unknown"})
     try:
         from media_inspect import inspect_url

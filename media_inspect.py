@@ -60,7 +60,7 @@ def _options(url, flat):
         "js_runtimes": {runtime: {} for runtime in js_runtimes} or None,
         "remote_components": ["ejs:github"],
         "proxy": (youtube_proxy if youtube and youtube_proxy else proxy) or None,
-        "impersonate": ImpersonateTarget.from_str("chrome") if ImpersonateTarget else None,
+        "impersonate": ImpersonateTarget.from_str("chrome") if ImpersonateTarget and youtube else None,
     }
     if flat:
         options["extract_flat"] = "in_playlist"

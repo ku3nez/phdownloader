@@ -31,10 +31,13 @@ from asr_routing import asr_engine_for_language, normalize_language
 from media_urls import is_youtube_url
 from downloader import detect_language, download_media, get_media_duration, transcribe_with_whisper
 from task_store import TaskStore
+import url_guard
 
 load_dotenv()
 
 store = TaskStore()
+_redis_target = __import__("urllib.parse").parse.urlparse(os.getenv("REDIS_URL", "redis://127.0.0.1:6379"))
+url_guard.install([(_redis_target.hostname, _redis_target.port or 6379)])
 # Shown in task logs and the per-chunk progress UI.
 NODE_NAME = os.getenv("NODE_DISPLAY_NAME", "").strip() or socket.gethostname()
 TERMINAL_TASK_STATUSES = {"cancelled", "failed", "completed"}
@@ -779,6 +782,12 @@ def process_playlist_item(task_id: str, chunk_id: str) -> None:
     if is_youtube_url(url) and youtube_blocked() and hand_off_youtube(task_id, "worker.process_playlist_item", chunk_id, chunk_id=chunk_id, skip=True):
         return
     store.update_chunk(task_id, chunk_id, status="processing", worker_node=NODE_NAME, error=None, progress=0)
+    try:
+        url_guard.check_public_url(url)
+    except url_guard.BlockedURL as exc:
+        store.update_chunk(task_id, chunk_id, status="failed", error=str(exc))
+        batch.refresh(store, task_id)
+        return
     log_event(task_id, f"playlist item {chunk.get('index')} worker_node={NODE_NAME} url={url}")
     items_dir = os.path.join(TASKS_ROOT, task_id, "items")
     os.makedirs(items_dir, exist_ok=True)
@@ -852,6 +861,7 @@ def process_remote_media(task_id: str, url: str, quality: str = "720", download_
             log_event(task_id, f"source duration={info['duration']}s")
 
     try:
+        url_guard.check_public_url(url)
         effective_type = "audio" if download_type == "transcript" else download_type
         effective_quality = "128" if download_type == "transcript" else quality
         filename = download_media(

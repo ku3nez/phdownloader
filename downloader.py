@@ -598,7 +598,9 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
                 }
             } if is_ph else {}
         ),
-        'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget else None,
+        # curl_cffi (impersonation) opens its own sockets, outside url_guard's
+        # check; use it only for the sites that need it.
+        'impersonate': ImpersonateTarget.from_str('chrome') if ImpersonateTarget and (is_youtube or is_ph) else None,
         'http_headers': {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
