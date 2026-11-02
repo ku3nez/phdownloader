@@ -559,7 +559,10 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
     # native downloader for all YouTube media; it retains the extractor's
     # headers and request handling. For other sites, aria2c remains useful for
     # direct HTTP files while native downloaders handle HLS/DASH fragments.
-    use_aria2 = has_aria2 and not is_youtube
+    # aria2c is a separate program and follows links/redirects outside
+    # url_guard's socket check, so arbitrary sites use yt-dlp's own
+    # downloader; aria2c stays for PornHub's fixed CDN only.
+    use_aria2 = has_aria2 and is_ph
     if use_aria2:
         print("Using aria2c for direct HTTP downloads; native downloader for HLS/DASH streams")
 
