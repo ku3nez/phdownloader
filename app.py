@@ -29,8 +29,10 @@ from cluster_config import (
 from asr_routing import FAST_ENGINES, normalize_language, normalize_whisper_model
 from media_urls import is_pornhub_url, is_youtube_url
 from task_store import RQ_WAITING_STATUSES, TaskStore
+import abuse_guard
 import batch
 import url_guard
+from public_view import public_task
 
 
 def safe_print(*args, **kwargs):
@@ -302,6 +304,15 @@ def is_uploaded_video_file(file) -> bool:
     return bool(file.content_type and file.content_type.startswith("video/")) or extension in {".mp4", ".mov", ".mkv", ".avi", ".webm"}
 
 
+@app.before_request
+def refuse_banned_clients():
+    if request.endpoint in (None, "static"):
+        return None
+    if abuse_guard.is_banned(store.redis, abuse_guard.client_ip(request)):
+        return jsonify({"error": "Access denied"}), 403
+    return None
+
+
 @app.route("/")
 def index():
     return render_template(
@@ -313,6 +324,10 @@ def index():
 
 @app.route("/start", methods=["POST"])
 def start_download():
+    client = abuse_guard.client_ip(request)
+    if abuse_guard.over_limit(store.redis, "start", client):
+        log_event("HTTP", f"POST /start rate limited client={client}")
+        return jsonify({"error": "Слишком много запросов, попробуйте позже. / Too many requests, try again later."}), 429
     log_event("HTTP", f"POST /start remote_addr={request.remote_addr} is_json={request.is_json} headers=[{summarize_headers()}]")
     if request.is_json:
         url = request.json.get("url")
@@ -386,7 +401,9 @@ def start_download():
         for link in ([url] if url and not file else []) + [item["url"] for item in items]:
             url_guard.check_public_url(link)
     except url_guard.BlockedURL as exc:
-        log_event("HTTP", f"rejected link from {request.remote_addr}: {exc}")
+        log_event("HTTP", f"rejected link from {client}: {exc}")
+        if abuse_guard.note_rejected(store.redis, client):
+            log_event("HTTP", f"banned {client} for {abuse_guard.BAN_SECONDS}s after repeated refused links")
         return jsonify({"error": ("Эта ссылка не поддерживается: " if is_russian else "This link is not supported: ") + str(exc)}), 400
     if file and download_type != "transcript" and not publish_to_telegram:
         return jsonify({"error": "Uploaded files are supported only for transcription or Telegram video publishing"}), 400
@@ -419,7 +436,7 @@ def start_download():
         "telegram_status": "requested" if publish_to_telegram else "not_requested",
     }
     store.save_task(task_id, task)
-    store.append_log(task_id, f"[{task_id}] Task created on API node remote_addr={request.remote_addr}")
+    store.append_log(task_id, f"[{task_id}] Task created on API node remote_addr={client}")
 
     try:
         if items:
@@ -541,9 +558,13 @@ def inspect_link():
     url = str((request.get_json(silent=True) or {}).get("url") or "").strip()
     if not url.startswith(("http://", "https://")) or is_pornhub_url(url):
         return jsonify({"kind": "unknown"})
+    client = abuse_guard.client_ip(request)
+    if abuse_guard.over_limit(store.redis, "inspect", client):
+        return jsonify({"kind": "unknown"})
     try:
         url_guard.check_public_url(url)
     except url_guard.BlockedURL:
+        abuse_guard.note_rejected(store.redis, client)
         return jsonify({"kind": "unknown"})
     try:
         from media_inspect import inspect_url
@@ -566,7 +587,7 @@ def get_progress(task_id: str):
     if eta is not None:
         task["eta_minutes"] = eta
     log_event(task_id, f"GET /progress status={task.get('status')} progress={task.get('progress')} filename={task.get('filename')} error={task.get('error')}")
-    return jsonify(task)
+    return jsonify(public_task(task, task_id))
 
 
 @app.route("/cancel/<task_id>", methods=["POST"])

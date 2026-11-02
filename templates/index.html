@@ -1772,7 +1772,7 @@
 
                     if (data.logs && data.logs.length > 0) {
                         const logContainer = document.getElementById('log-container');
-                        logContainer.innerHTML = data.logs.map(log => `<div>${log}</div>`).join('');
+                        logContainer.innerHTML = data.logs.map(log => `<div>${escapeHtml(log)}</div>`).join("");
                         logContainer.scrollTop = logContainer.scrollHeight;
                     }
 
