@@ -16,23 +16,34 @@ LIMITS = {
 }
 REJECTED_BEFORE_BAN = int(os.getenv("BAN_AFTER_REJECTED_LINKS", 3))
 BAN_SECONDS = int(os.getenv("BAN_SECONDS", 24 * 3600))
-# Requests come either straight to the API or through the reverse proxy for
-# the domain; only a private-network peer may say who the real client is.
-TRUSTED_PROXY_NETS = [ipaddress.ip_network(n) for n in os.getenv(
-    "TRUSTED_PROXY_NETS", "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16").split(",") if n.strip()]
+# Requests reach the API straight or through a chain of reverse proxies
+# (front -> relay -> local nginx), each appending to X-Forwarded-For. The
+# client is the right-most address that is not one of our proxies; anything
+# left of it may have been written by the client itself.
+TRUSTED_PROXY_NETS = [ipaddress.ip_network(n.strip()) for n in os.getenv(
+    "TRUSTED_PROXY_NETS",
+    "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,"
+    "138.124.254.81/32,77.238.249.189/32,194.246.82.114/32,91.84.110.55/32,81.88.23.239/32,"
+    "57.131.195.41/32,85.190.126.94/32").split(",") if n.strip()]
+
+
+def _trusted(address):
+    try:
+        ip = ipaddress.ip_address(address.strip())
+    except ValueError:
+        return False
+    return any(ip in net for net in TRUSTED_PROXY_NETS)
 
 
 def client_ip(request):
     peer = request.remote_addr or ""
-    try:
-        trusted = any(ipaddress.ip_address(peer) in net for net in TRUSTED_PROXY_NETS)
-    except ValueError:
-        trusted = False
-    if trusted:
-        forwarded = request.headers.get("X-Real-IP") or (request.headers.get("X-Forwarded-For") or "").split(",")[0]
-        if forwarded.strip():
-            return forwarded.strip()
-    return peer
+    if not _trusted(peer):
+        return peer
+    chain = [part.strip() for part in (request.headers.get("X-Forwarded-For") or "").split(",") if part.strip()]
+    for address in reversed(chain):
+        if not _trusted(address):
+            return address
+    return chain[0] if chain else peer
 
 
 def is_banned(redis, ip):
