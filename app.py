@@ -307,6 +307,20 @@ def is_uploaded_video_file(file) -> bool:
     return bool(file.content_type and file.content_type.startswith("video/")) or extension in {".mp4", ".mov", ".mkv", ".avi", ".webm"}
 
 
+@app.after_request
+def keep_out_of_search(response):
+    # A private tool: nothing here should be indexed, cached by search
+    # engines or leak its address through the Referer header.
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    return Response("User-agent: *\nDisallow: /\n", mimetype="text/plain")
+
+
 @app.errorhandler(413)
 def upload_too_large(_error):
     gigabytes = MAX_UPLOAD_BYTES / 1024 ** 3

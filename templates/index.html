@@ -4,6 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow, noarchive">
+    <meta name="referrer" content="no-referrer">
     <title>Video Downloader</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1151,10 +1153,15 @@
             const checkbox = document.getElementById('telegramPublishCheckbox');
             if (!option || !checkbox) return;
             const enabled = isTelegramModeEnabled() && (isRemoteTelegramVideoRequest() || isLocalTelegramVideoRequest());
-            const wasHidden = option.style.display === 'none';
             option.style.display = enabled ? 'flex' : 'none';
-            if (enabled && wasHidden) checkbox.checked = true;
-            if (!enabled) checkbox.checked = false;
+            // On by default for PornHub links and uploaded files, off for
+            // other sites; the default is set again only when that kind of
+            // source changes, so a manual choice stays.
+            const kind = !enabled ? '' : (isLocalTelegramVideoRequest() ? 'file' : (isPornHubVideoRequest() ? 'pornhub' : 'other'));
+            if (kind !== option.dataset.kind) {
+                checkbox.checked = kind === 'file' || kind === 'pornhub';
+                option.dataset.kind = kind;
+            }
         }
 
         function getTechnicalLogsText() {
