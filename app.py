@@ -395,10 +395,10 @@ def start_download():
         num_speakers = None
     if num_speakers is not None and not 1 <= num_speakers <= 20:
         num_speakers = None
-    is_pornhub_video = is_pornhub_url(url) and download_type == "video"
+    is_remote_video = bool(url) and not file and not items and download_type == "video"
     is_uploaded_video = is_uploaded_video_file(file) and download_type == "video"
-    if publish_to_telegram and not (is_pornhub_video or is_uploaded_video):
-        return jsonify({"error": "Telegram publishing is available only for PornHub or uploaded video files"}), 400
+    if publish_to_telegram and not (is_remote_video or is_uploaded_video):
+        return jsonify({"error": "Telegram publishing is available only for single videos"}), 400
     # Telegram needs the server-side file as its upload source.  Do not also
     # redirect the browser to download the completed video.
     if publish_to_telegram:

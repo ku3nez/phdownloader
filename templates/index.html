@@ -983,6 +983,7 @@
             document.getElementById('inspectHint').textContent = '';
             renderAudioTracks();
             updateButtonText();
+            updateTelegramPublishVisibility();
         }
 
         function scheduleInspect() {
@@ -1014,6 +1015,7 @@
                 }
                 renderAudioTracks();
                 updateButtonText();
+                updateTelegramPublishVisibility();
             } catch (e) {
                 if (seq === inspectSeq) hint.textContent = '';
             }
@@ -1130,6 +1132,15 @@
             return window.location.hash === '#telegram';
         }
 
+        // Any single video link (PornHub, sites found by the page player
+        // search, ...) can be sent to Telegram in #telegram mode.
+        function isRemoteTelegramVideoRequest() {
+            const url = (document.getElementById('urlInput')?.value || '').trim();
+            const format = document.querySelector('input[name="format"]:checked')?.value;
+            return isTelegramModeEnabled() && inputSource === 'url' && format === 'video'
+                && /^https?:\/\/\S+$/i.test(url) && !playlist;
+        }
+
         function isLocalTelegramVideoRequest() {
             const format = document.querySelector('input[name="format"]:checked')?.value;
             return isTelegramModeEnabled() && inputSource === 'file' && format === 'video';
@@ -1139,7 +1150,7 @@
             const option = document.getElementById('telegramPublishOption');
             const checkbox = document.getElementById('telegramPublishCheckbox');
             if (!option || !checkbox) return;
-            const enabled = isTelegramModeEnabled() && (isPornHubVideoRequest() || isLocalTelegramVideoRequest());
+            const enabled = isTelegramModeEnabled() && (isRemoteTelegramVideoRequest() || isLocalTelegramVideoRequest());
             const wasHidden = option.style.display === 'none';
             option.style.display = enabled ? 'flex' : 'none';
             if (enabled && wasHidden) checkbox.checked = true;
@@ -1560,7 +1571,7 @@
                 const telegramPublishCheckbox = document.getElementById('telegramPublishCheckbox');
                 const publishToTelegram = Boolean(
                     isLocalTelegramVideoRequest()
-                    || (telegramPublishCheckbox?.checked && isPornHubVideoRequest())
+                    || (telegramPublishCheckbox?.checked && isRemoteTelegramVideoRequest())
                 );
                 const saveOnServer = Boolean(serverOnlyCheckbox?.checked || publishToTelegram);
                 if (publishToTelegram && !window.confirm(isRussian
