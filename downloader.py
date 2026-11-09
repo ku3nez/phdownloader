@@ -378,6 +378,15 @@ def transcribe_with_whisper(audio_path, output_path, structured=True, model_size
 ORIGINAL_AUDIO = '[format_note*=original][format_id!*=drc]'
 
 
+def _has_site_extractor(url):
+    """True when yt-dlp has a dedicated (non-generic) extractor for url."""
+    try:
+        from yt_dlp.extractor import gen_extractor_classes
+        return any(ie.ie_key() != 'Generic' and ie.suitable(url) for ie in gen_extractor_classes())
+    except Exception:
+        return True
+
+
 def _private_cookie_copy(path):
     import glob
     import shutil
@@ -699,7 +708,8 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         safe_prefix = str(filename_prefix).replace('%', '%%').replace('/', '_').replace('\\', '_')
         ydl_opts['outtmpl'] = ydl_opts['outtmpl'].replace('%(title)s', safe_prefix + '%(title)s')
 
-    if is_threads_url(url):
+    from_threads = is_threads_url(url)
+    if from_threads:
         # yt-dlp has no Threads extractor: read the post ourselves and hand
         # yt-dlp the direct MP4 link with the post's title.
         from threads_extractor import resolve_threads_post
@@ -715,6 +725,25 @@ def download_media(url, output_path='downloads', quality='720', media_type='vide
         # height filters would reject it.
         ydl_opts['format'] = 'bestaudio/best' if media_type in ('audio', 'transcript') else 'best'
         ydl_opts['http_headers']['Referer'] = 'https://www.threads.com/'
+
+    if not from_threads and not is_youtube and not is_ph and not _has_site_extractor(url):
+        # No yt-dlp extractor for this site: look for a player the page
+        # builds with JavaScript (stream address hidden in base64 etc.).
+        from page_media import resolve
+        found = resolve(url, proxy=proxy)
+        if found:
+            if progress_callback:
+                progress_callback({'type': 'status', 'msg': f"[page] found the player's stream, title: {found['title']}"})
+            url = found['url']
+            literal_title = found['title'].replace('%', '%%').replace('/', '_')
+            ydl_opts['outtmpl'] = ydl_opts['outtmpl'].replace('%(title)s', literal_title)
+            ydl_opts['http_headers']['Referer'] = found['referer']
+            if media_type in ('audio', 'transcript'):
+                ydl_opts['format'] = 'bestaudio/best'
+            elif quality and quality != 'best':
+                ydl_opts['format'] = f'best[height<={quality}]/best'
+            else:
+                ydl_opts['format'] = 'best'
 
     info = None
     ydl_instance = None
